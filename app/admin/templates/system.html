@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frunze — статус системы</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#F1F5F9; --surface:#FFFFFF; --elev:#F1F5F9; --border:#E2E8F0; --text:#0F172A;
+            --muted:#64748B; --accent:#2563EB; --warm:#D97706; --hot:#DC2626; --green:#059669;
+            --mono:'Fira Code', ui-monospace, monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Fira Sans',system-ui,sans-serif; font-size:14px; }
+    .topbar { display:flex; align-items:center; gap:16px; padding:0 20px; height:58px;
+              background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; }
+    .topbar a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .wrap { padding:22px; max-width:900px; margin:0 auto; }
+    h1 { font-size:20px; margin:0 0 18px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:15px 17px; }
+    .card .l { color:var(--muted); font-size:12.5px; margin-bottom:6px; }
+    .card .v { font-size:16px; font-weight:600; display:flex; align-items:center; gap:8px; }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+    .ok { background:var(--green); } .bad { background:var(--hot); } .warn { background:var(--warm); } .off { background:#94A3B8; }
+    .mono { font-family:var(--mono); }
+    .muted { color:var(--muted); }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; margin-top:18px; }
+    .panel h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 12px; }
+    table { width:100%; border-collapse:collapse; }
+    td,th { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); font-size:13px; }
+    th { color:var(--muted); font-weight:500; }
+    /* Переключатель (вкл/выкл) */
+    .toggle-row { display:flex; gap:16px; align-items:flex-start; }
+    .toggle-text { flex:1; }
+    .t-title { font-size:15px; font-weight:600; margin-bottom:5px; }
+    .t-desc { color:var(--muted); font-size:13px; line-height:1.5; max-width:640px; }
+    .state { font-family:var(--mono); font-size:12px; padding:2px 8px; border-radius:6px; }
+    .state.on { background:rgba(5,150,105,.12); color:var(--green); }
+    .state.off { background:#F1F5F9; color:var(--muted); }
+    .switch { position:relative; display:inline-block; width:50px; height:28px; flex-shrink:0; }
+    .switch input { opacity:0; width:0; height:0; }
+    .slider { position:absolute; cursor:pointer; inset:0; background:#CBD5E1; border-radius:28px; transition:.2s; }
+    .slider:before { content:""; position:absolute; height:22px; width:22px; left:3px; bottom:3px;
+                     background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+    .switch input:checked + .slider { background:var(--green); }
+    .switch input:checked + .slider:before { transform:translateX(22px); }
+    .switch input:focus-visible + .slider { box-shadow:0 0 0 3px rgba(37,99,235,.25); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/admin">← Доски</a>
+    <b>Статус системы</b>
+    <a href="/admin/audit" style="margin-left:8px">Аудит-лог →</a>
+    <span style="flex:1"></span>
+    <span class="muted">{{ manager.name }}</span>
+  </header>
+  <div class="wrap">
+    <h1>Состояние сервиса</h1>
+    <div class="grid">
+      <div class="card">
+        <div class="l">LLM (OpenRouter)</div>
+        <div class="v"><span class="dot {{ 'ok' if s.llm_enabled else 'bad' }}"></span>{{ 'подключён' if s.llm_enabled else 'нет ключа' }}</div>
+      </div>
+      <div class="card">
+        <div class="l">Последнее входящее (Wappi)</div>
+        <div class="v">
+          {% if s.last_inbound_ago is none %}<span class="dot off"></span><span class="muted">ещё не было</span>
+          {% elif s.last_inbound_ago < 1800 %}<span class="dot ok"></span><span class="mono">{{ (s.last_inbound_ago/60)|round(0,'floor')|int }} мин назад</span>
+          {% else %}<span class="dot warn"></span><span class="mono">{{ (s.last_inbound_ago/60)|round(0,'floor')|int }} мин назад</span>{% endif %}
+        </div>
+      </div>
+      <div class="card">
+        <div class="l">Сбои LLM (с рестарта)</div>
+        <div class="v"><span class="dot {{ 'ok' if s.llm_failures == 0 else 'bad' }}"></span><span class="mono">{{ s.llm_failures }}</span>
+          {% if s.llm_failure_ago is not none %}<span class="muted" style="font-size:12px">{{ (s.llm_failure_ago/60)|round(0,'floor')|int }} мин назад</span>{% endif %}</div>
+      </div>
+      <div class="card">
+        <div class="l">Сбои отправки (с рестарта)</div>
+        <div class="v"><span class="dot {{ 'ok' if s.send_failures == 0 else 'bad' }}"></span><span class="mono">{{ s.send_failures }}</span>
+          {% if s.send_failure_ago is not none %}<span class="muted" style="font-size:12px">{{ (s.send_failure_ago/60)|round(0,'floor')|int }} мин назад</span>{% endif %}</div>
+      </div>
+    </div>
+
+    {% include "_automation.html" %}
+
+    {% include "_bot_toggles.html" %}
+
+    <div class="panel">
+      <h2>Конфигурация</h2>
+      <table>
+        <tr><td>Хранилище состояния</td><td class="mono">{{ s.state_backend }}</td></tr>
+        <tr><td>Хранилище панели</td><td class="mono">{{ s.panel_backend }}</td></tr>
+        <tr><td>CRM</td><td class="mono">{{ s.crm_backend }}</td></tr>
+        <tr><td>Проверка вебхуков (секрет)</td><td>{{ '✅ включена' if s.webhook_secret_set else '⚠️ выключена' }}</td></tr>
+        <tr><td>Watchdog-алерты</td><td>{{ '✅ настроены' if s.alerts_configured else '— не настроены' }}</td></tr>
+        <tr><td>Автодожим</td><td>{{ '✅ включён' if s.followup_enabled else '— выключен' }}</td></tr>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>

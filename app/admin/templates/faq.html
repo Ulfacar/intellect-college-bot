@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frunze — FAQ</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#F1F5F9; --surface:#FFFFFF; --border:#E2E8F0; --text:#0F172A;
+            --muted:#64748B; --accent:#2563EB; --green:#059669; --hot:#DC2626;
+            --mono:'Fira Code', ui-monospace, monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Fira Sans',system-ui,sans-serif; font-size:14px; }
+    .topbar { display:flex; align-items:center; gap:14px; padding:0 20px; height:58px;
+              background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:2; }
+    .topbar a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .wrap { padding:22px; max-width:1160px; margin:0 auto; }
+    h1 { font-size:20px; margin:0 0 16px; }
+    .tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+    .tab { padding:8px 13px; border:1px solid var(--border); border-radius:8px; background:var(--surface);
+           color:var(--muted); text-decoration:none; font-weight:600; }
+    .tab.active { color:var(--accent); background:rgba(37,99,235,.10); border-color:rgba(37,99,235,.25); }
+    .grid { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:16px; align-items:start; }
+    @media (max-width: 920px) { .grid { grid-template-columns:1fr; } }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; }
+    .panel h2 { margin:0 0 12px; font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    .rule { display:grid; grid-template-columns:1fr auto; gap:12px; padding:13px 0; border-bottom:1px solid var(--border); }
+    .rule:last-child { border-bottom:0; }
+    .title { font-weight:700; margin-bottom:5px; }
+    .meta { display:flex; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px; }
+    .mono { font-family:var(--mono); }
+    .badge { padding:2px 7px; border-radius:6px; background:#F1F5F9; color:var(--muted); font-size:11px; font-weight:600; }
+    .badge.on { background:rgba(5,150,105,.12); color:var(--green); }
+    .badge.off { background:rgba(220,38,38,.10); color:var(--hot); }
+    .actions { display:flex; gap:7px; align-items:flex-start; }
+    button, .btn { border:1px solid var(--border); border-radius:8px; background:#F8FAFC; color:var(--text);
+                   padding:8px 11px; font:inherit; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; }
+    button.primary { background:var(--accent); color:white; border-color:var(--accent); }
+    label { display:block; font-weight:600; margin:11px 0 5px; }
+    input[type="text"], input[type="number"], textarea {
+      width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; font:inherit; background:#F8FAFC;
+    }
+    textarea { min-height:82px; resize:vertical; }
+    textarea.answer { min-height:150px; }
+    .check { display:flex; gap:8px; align-items:center; margin-top:10px; color:var(--text); font-weight:500; }
+    .check input { width:16px; height:16px; }
+    .muted { color:var(--muted); }
+    .empty { padding:28px; text-align:center; color:var(--muted); border:1px dashed var(--border); border-radius:10px; }
+    .result { margin-top:12px; padding:11px; border-radius:8px; background:#F8FAFC; border:1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/admin">← Доски</a>
+    <b>FAQ-правила</b>
+    <a href="/admin/audit">Аудит →</a>
+    <span style="flex:1"></span>
+    <span class="muted">{{ manager.name }}</span>
+  </header>
+  <div class="wrap">
+    <h1>Детерминированные ответы без LLM</h1>
+    <nav class="tabs">
+      {% for key, label in tabs %}
+      <a class="tab {{ 'active' if scope == key else '' }}" href="/admin/faq?scope={{ key }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Правила</h2>
+        {% if rows %}
+          {% for r in rows %}
+          <div class="rule">
+            <div>
+              <div class="title">{{ r.title }}</div>
+              <div class="meta">
+                <span class="badge {{ 'on' if r.enabled else 'off' }}">{{ 'включено' if r.enabled else 'выключено' }}</span>
+                <span class="badge mono">priority {{ r.priority }}</span>
+                {% if r.handoff_only %}<span class="badge">handoff</span>{% endif %}
+                {% if not r.allow_during_qualification %}<span class="badge">не в квалификации</span>{% endif %}
+              </div>
+              <div class="muted" style="margin-top:7px">Триггеры: {{ (r.patterns or [])|join(', ') }}</div>
+              {% if r.negative_terms %}
+              <div class="muted" style="margin-top:4px">Минус-слова: {{ r.negative_terms|join(', ') }}</div>
+              {% endif %}
+            </div>
+            <div class="actions">
+              <a class="btn" href="/admin/faq?scope={{ scope }}&edit={{ r.id }}">Править</a>
+              <form method="post" action="/admin/faq/{{ r.id }}/toggle">
+                <input type="hidden" name="scope" value="{{ scope }}">
+                <input type="hidden" name="enabled" value="{{ '0' if r.enabled else '1' }}">
+                <button type="submit">{{ 'Выключить' if r.enabled else 'Включить' }}</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">В этом разделе пока нет FAQ-правил.</div>
+        {% endif %}
+      </section>
+
+      <aside>
+        <section class="panel">
+          <h2>{{ 'Редактирование' if edit else 'Новое правило' }}</h2>
+          <form method="post" action="/admin/faq/save">
+            <input type="hidden" name="entry_id" value="{{ edit.id if edit else 0 }}">
+            <input type="hidden" name="scope" value="{{ scope }}">
+            <label>Название</label>
+            <input type="text" name="title" value="{{ edit.title if edit else '' }}" required>
+            <label>Триггер-фразы</label>
+            <textarea name="patterns" required>{{ (edit.patterns or [])|join('\n') if edit else '' }}</textarea>
+            <label>Минус-слова</label>
+            <textarea name="negative_terms">{{ (edit.negative_terms or [])|join('\n') if edit else '' }}</textarea>
+            <label>Ответ</label>
+            <textarea class="answer" name="answer" required>{{ edit.answer if edit else '' }}</textarea>
+            <label>Priority</label>
+            <input type="number" name="priority" value="{{ edit.priority if edit else 0 }}">
+            <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if (not edit or edit.enabled) else '' }}> Включено</label>
+            <label class="check"><input type="checkbox" name="handoff_only" value="1" {{ 'checked' if edit and edit.handoff_only else '' }}> Только эскалация</label>
+            <label class="check"><input type="checkbox" name="allow_during_qualification" value="1" {{ 'checked' if (not edit or edit.allow_during_qualification) else '' }}> Можно во время квалификации</label>
+            <button class="primary" type="submit" style="margin-top:14px">Сохранить</button>
+          </form>
+        </section>
+
+        <section class="panel" style="margin-top:16px">
+          <h2>Проверить фразу</h2>
+          <form method="post" action="/admin/faq/test">
+            <input type="hidden" name="scope" value="{{ scope }}">
+            <textarea name="text" placeholder="Текст клиента">{{ test_text or '' }}</textarea>
+            <button type="submit" style="margin-top:10px">Проверить</button>
+          </form>
+          {% if tested %}
+          <div class="result">
+            {% if test_hit %}
+              Сработает: <b>{{ test_hit.title }}</b> <span class="mono">(id {{ test_hit.id }}, priority {{ test_hit.priority }})</span>
+            {% else %}
+              Совпадений нет или найден конфликт равного priority.
+            {% endif %}
+          </div>
+          {% endif %}
+        </section>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

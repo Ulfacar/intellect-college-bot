@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frunze — диалоги</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Светлая профессиональная тема (UI UX Pro Max): синий #2563EB + сделочный зелёный #059669,
+       Fira Sans (интерфейс) + Fira Code (числа/ID). Чистый минимализм, мягкие тени. */
+    :root {
+      --bg: #F1F5F9; --surface: #FFFFFF; --surface-2: #F1F5F9; --col: #F8FAFC;
+      --elev: #FFFFFF; --elev-hover: #F8FAFC;
+      --border: #E2E8F0; --border-2: #CBD5E1;
+      --text: #0F172A; --muted: #64748B; --faint: #94A3B8;
+      --accent: #2563EB; --accent-2: #1D4ED8; --accent-soft: rgba(37,99,235,.10);
+      --warm: #D97706; --warm-soft: rgba(217,119,6,.12);
+      --hot: #DC2626; --hot-soft: rgba(220,38,38,.10);
+      --green: #059669; --green-soft: rgba(5,150,105,.10); --manager: #059669;
+      --mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --r-sm: 8px; --r: 11px; --r-lg: 15px;
+      --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.07);
+      --t: 180ms cubic-bezier(.4,0,.2,1);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font-family: 'Fira Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    ::selection { background: var(--accent-soft); }
+    ::-webkit-scrollbar { height: 10px; width: 10px; }
+    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 8px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* ---------- Top bar ---------- */
+    .topbar { display: flex; align-items: center; gap: 18px; padding: 0 20px; height: 58px;
+              background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+    .brand .logo { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg,#2563EB,#059669);
+                   display: grid; place-items: center; color: #fff; font-weight: 800; box-shadow: 0 2px 8px rgba(37,99,235,.25); }
+    .brand small { color: var(--muted); font-weight: 500; font-size: 11.5px; display: block; margin-top: -2px; }
+    .tabs { display: flex; gap: 4px; margin-left: 6px; }
+    .tab { background: transparent; color: var(--muted); border: 1px solid transparent; padding: 7px 14px;
+           border-radius: 9px; cursor: pointer; font: inherit; font-weight: 600; font-size: 13px;
+           transition: background var(--t), color var(--t); }
+    .tab:hover { background: var(--surface-2); color: var(--text); }
+    .tab.active { background: var(--accent-soft); color: var(--accent); }
+    .tab-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px;
+                 margin-left: 4px; border-radius: 9px; background: var(--hot); color: #fff;
+                 font-family: var(--mono); font-size: 10.5px; font-weight: 700; vertical-align: middle; }
+    .spacer { flex: 1; }
+
+    /* ---------- Search ---------- */
+    .search { position: relative; display: flex; align-items: center; }
+    .search svg { position: absolute; left: 11px; width: 15px; height: 15px; color: var(--faint); pointer-events: none; }
+    .search input { width: 230px; padding: 8px 12px 8px 34px; background: var(--surface-2); color: var(--text);
+                    border: 1px solid var(--border-2); border-radius: 9px; font: inherit; font-size: 13px;
+                    transition: border-color var(--t), box-shadow var(--t), width var(--t); }
+    .search input::placeholder { color: var(--faint); }
+    .search input:focus { outline: none; width: 280px; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .me { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; font-weight: 500; }
+    .me .av { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2);
+              border: 1px solid var(--border-2); display: grid; place-items: center; color: var(--muted); }
+
+    /* ---------- Layout ---------- */
+    .layout { display: grid; grid-template-columns: 1fr 410px; gap: 16px; padding: 16px; align-items: start; }
+    #board { min-width: 0; }
+    #chat { position: sticky; top: 74px; max-height: calc(100vh - 90px); }
+    @media (max-width: 1180px) { .layout { grid-template-columns: 1fr; } #chat { position: static; max-height: none; } #chat .panel { max-height: none; } }
+
+    /* ---------- Metrics ---------- */
+    .metrics { display: flex; gap: 10px; margin-bottom: 14px; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+            padding: 11px 16px; min-width: 120px; }
+    .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .stat .l { font-size: 11.5px; color: var(--muted); font-weight: 500; margin-top: 2px; }
+    .stat.waiting .n { color: var(--warm); }
+    .stat.silent .n { color: var(--warm); }
+    .stat.intercepted .n { color: var(--hot); }
+
+    /* ---------- Board ---------- */
+    .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+    .col { flex: 0 0 282px; width: 282px; background: var(--col); border: 1px solid var(--border);
+           border-radius: var(--r); padding: 9px; }
+    .col.empty { flex-basis: 168px; width: 168px; opacity: .55; }
+    .col-head { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px 11px; }
+    .col-title { display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 700;
+                 text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); color: var(--accent); }
+    .col[data-col="greeting"] .dot { background: #6b7280; color: #6b7280; }
+    .col[data-col="qualification"] .dot { background: #38bdf8; color: #38bdf8; }
+    .col[data-col="progress"] .dot { background: #a78bfa; color: #a78bfa; }
+    .col[data-col="office"] .dot { background: #2dd4bf; color: #2dd4bf; }
+    .col[data-col="manager"] .dot { background: #fbbf24; color: #fbbf24; }
+    .col[data-col="silent"] .dot { background: #d97706; color: #d97706; }
+    .col[data-col="follow_up"] .dot { background: #fb7185; color: #fb7185; }
+    .count { background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+             font-family: var(--mono); font-size: 11px; font-weight: 700; min-width: 20px; height: 19px; padding: 0 6px;
+             border-radius: 20px; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+    .col-empty { color: var(--faint); font-size: 18px; text-align: center; padding: 10px 6px; }
+    /* Drag-and-drop: карточки доски можно таскать между колонками. */
+    .board .card { cursor: grab; }
+    .board .card:active { cursor: grabbing; }
+    .card-ghost { background: var(--accent-soft); border: 1px dashed var(--accent); box-shadow: none; }
+    .card-ghost > * { visibility: hidden; }
+    .card-fallback { box-shadow: 0 14px 32px rgba(15,23,42,.22); transform: scale(1.03);
+                     border-color: var(--accent); opacity: .98; cursor: grabbing; }
+    .col.drop-target { background: var(--accent-soft); outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+    /* ---------- Inbox / Search (вертикальный список по всем воронкам) ---------- */
+    .inbox-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .inbox-title { font-size: 15px; font-weight: 700; }
+    .inbox-sub { color: var(--muted); font-size: 12px; }
+    .inbox-head .tab { padding: 4px 10px; font-size: 12px; }
+    .inbox-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; align-items: start; }
+    .inbox-empty { color: var(--muted); background: var(--col); border: 1px dashed var(--border-2);
+                   border-radius: var(--r); padding: 28px; text-align: center; font-size: 14px; }
+    .inbox-list .card { margin-bottom: 0; }
+    .funnel-badge { margin-left: auto; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+    .funnel-badge[data-funnel="visa"] { background: var(--accent-soft); color: var(--accent); border-color: rgba(37,99,235,.20); }
+    .funnel-badge[data-funnel="tours"] { background: var(--green-soft); color: var(--green); border-color: rgba(5,150,105,.20); }
+    .funnel-badge[data-funnel="tickets"] { background: var(--warm-soft); color: var(--warm); border-color: rgba(217,119,6,.20); }
+
+    /* ---------- Card ---------- */
+    .card { background: var(--elev); border: 1px solid var(--border); border-radius: var(--r-sm);
+            padding: 8px 9px; margin-bottom: 5px; cursor: pointer; position: relative; overflow: hidden;
+            transition: background var(--t), border-color var(--t), transform var(--t); }
+    .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+    .card[data-wait="warm"]::before { background: var(--warm); }
+    .card[data-wait="hot"]::before { background: var(--hot); }
+    .card:hover { background: var(--elev-hover); border-color: var(--border-2); transform: translateY(-1px); }
+    .card:focus-visible, .card.active { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .card-top { display: flex; align-items: center; gap: 8px; }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+              font-weight: 700; font-size: 11px; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.25); }
+    .card-id { min-width: 0; }
+    .card-id .nm { font-weight: 600; font-size: 12.5px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-id .ph { color: var(--faint); font-size: 11px; font-family: var(--mono); line-height: 1.1; }
+    .card .last { color: var(--muted); font-size: 12px; margin-top: 5px;
+                  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+    .card .last b { color: #334155; font-weight: 600; }
+    .card-foot { display: flex; align-items: center; gap: 6px; margin-top: 5px; flex-wrap: nowrap; overflow: hidden; }
+    .time { color: var(--faint); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+    .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600;
+             padding: 2px 7px; border-radius: 6px; }
+    .badge svg { width: 11px; height: 11px; }
+    .badge.wait-warm { background: var(--warm-soft); color: var(--warm); }
+    .badge.wait-hot { background: var(--hot-soft); color: var(--hot); }
+    .badge.silent { background: var(--warm-soft); color: var(--warm); }
+    .badge.hot-lead { background: var(--hot-soft); color: var(--hot); }
+    .badge.intercepted { background: var(--hot-soft); color: var(--hot); }
+    .push { margin-left: auto; }
+
+    /* ---------- Chat panel ---------- */
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+             box-shadow: var(--shadow); overflow: hidden; max-height: inherit;
+             display: flex; flex-direction: column; }
+    .panel-empty { display: grid; place-items: center; gap: 12px; padding: 72px 24px; color: var(--faint); text-align: center; }
+    .panel-empty svg { width: 40px; height: 40px; opacity: .5; }
+    .ph-head { display: flex; align-items: center; gap: 11px; padding: 14px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .ph-head .meta { min-width: 0; }
+    .ph-head .nm { font-weight: 700; font-size: 15px; }
+    .ph-sub { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .tag { font-size: 11px; font-weight: 600; color: var(--muted); background: var(--surface-2);
+           border: 1px solid var(--border); padding: 2px 8px; border-radius: 6px; }
+    .tag.temp-new { color: var(--muted); }
+    .tag.temp-warm { color: var(--warm); background: var(--warm-soft); border-color: rgba(245,158,11,.22); }
+    .tag.temp-hot { color: var(--hot); background: var(--hot-soft); border-color: rgba(248,113,113,.22); }
+    .ph-actions { padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600;
+              padding: 8px 11px; border-radius: 9px; margin-bottom: 10px; }
+    .status.paused { color: var(--hot); background: var(--hot-soft); }
+    .status.active { color: var(--green); background: var(--green-soft); }
+    .status svg { width: 14px; height: 14px; flex-shrink: 0; }
+    .btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid transparent; border-radius: 9px;
+           padding: 9px 14px; cursor: pointer; font: inherit; font-weight: 600; font-size: 13px;
+           transition: background var(--t), border-color var(--t); width: 100%; justify-content: center; }
+    .btn svg { width: 15px; height: 15px; }
+    .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+    .btn-danger { background: var(--hot); color: #fff; }
+    .btn-danger:hover { background: #B91C1C; }
+    .btn-ghost { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
+    .btn-ghost:hover { background: #E2E8F0; }
+    .btn-brand { background: var(--accent); color: #fff; width: auto; }
+    .btn-brand:hover { background: var(--accent-2); }
+
+    .brief { margin: 14px 16px; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+    .manager-brief { border-color: rgba(37,99,235,.22); box-shadow: inset 3px 0 0 var(--accent); }
+    .brief-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+                   color: var(--muted); padding: 9px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+    .manager-brief .brief-title { color: var(--accent); background: var(--accent-soft); border-bottom-color: rgba(37,99,235,.20); }
+    .brief-row { display: grid; grid-template-columns: 132px 1fr; gap: 10px; padding: 7px 12px; font-size: 13px; }
+    .brief-row + .brief-row { border-top: 1px solid var(--border); }
+    .brief-row .k { color: var(--muted); font-weight: 500; }
+
+    .panel-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .panel-scroll > .outcome-bar, .panel-scroll > .quick-replies, .chat-details { margin-left: 16px !important; margin-right: 16px !important; }
+    .msgs { display: flex; flex-direction: column; gap: 9px; padding: 16px; max-height: none; overflow: visible; }
+    .msg { max-width: 84%; }
+    .msg .who { font-size: 10.5px; color: var(--faint); margin: 0 3px 3px; font-weight: 600; }
+    .bubble { padding: 9px 12px; border-radius: 13px; font-size: 13px; white-space: pre-wrap; word-wrap: break-word; }
+    .msg.client { align-self: flex-start; }
+    .msg.client .bubble { background: var(--surface-2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+    .msg.bot { align-self: flex-end; }
+    .msg.bot .who { text-align: right; }
+    .msg.bot .bubble { background: rgba(37,99,235,.08); border: 1px solid rgba(37,99,235,.20); color: #1E3A8A; border-bottom-right-radius: 4px; }
+    .msg.manager { align-self: flex-end; }
+    .msg.manager .who { text-align: right; }
+    .msg.manager .bubble { background: var(--green-soft); border: 1px solid rgba(5,150,105,.25); color: #065F46; border-bottom-right-radius: 4px; }
+    .msgs-empty { color: var(--faint); text-align: center; padding: 30px; font-size: 13px; }
+
+    .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); align-items: flex-end; flex-shrink: 0; }
+    .composer input, .composer textarea { flex: 1; padding: 10px 13px; background: var(--surface-2); color: var(--text);
+                      border: 1px solid var(--border-2); border-radius: 10px; font: inherit; font-size: 13px;
+                      transition: border-color var(--t), box-shadow var(--t); }
+    .composer textarea { min-height: 42px; max-height: 168px; line-height: 1.4; overflow-y: auto; resize: none; }
+    .composer input::placeholder, .composer textarea::placeholder { color: var(--faint); }
+    .composer input:focus, .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .hint { padding: 0 16px 13px; color: var(--faint); font-size: 11px; }
+
+    *:focus-visible { outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .card:hover { transform: none; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg></span>
+      <span>Frunze<small>диалоги</small></span>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="inbox"
+              hx-get="/admin/inbox" hx-target="#board" hx-swap="innerHTML" onclick="setTab(this)">
+        📥 Инбокс <span class="tab-badge" id="inbox-badge" hidden>0</span>
+      </button>
+      {% for key, label in funnels %}
+      <button class="tab" data-funnel="{{ key }}"
+              hx-get="/admin/board/{{ key }}" hx-target="#board" hx-swap="innerHTML" onclick="setTab(this)">
+        {{ label }}
+      </button>
+      {% endfor %}
+    </nav>
+    <span class="spacer"></span>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="search" name="q" placeholder="Поиск по имени или номеру…" autocomplete="off"
+             aria-label="Поиск диалогов"
+             hx-get="/admin/search" hx-trigger="keyup changed delay:300ms, search"
+             hx-target="#board" hx-swap="innerHTML">
+    </div>
+    <a href="/admin/analytics" class="btn btn-ghost" style="margin:0 4px 0 12px;text-decoration:none;padding:7px 12px">📊 Аналитика</a>
+    <a href="/admin/faq" class="btn btn-ghost" style="margin-right:4px;text-decoration:none;padding:7px 12px" title="FAQ-правила">FAQ</a>
+    <a href="/admin/system" class="btn btn-ghost" style="margin-right:4px;text-decoration:none;padding:7px 12px" title="Статус системы">⚙️</a>
+    <a href="/admin/audit" class="btn btn-ghost" style="margin-right:8px;text-decoration:none;padding:7px 12px" title="Аудит-лог">📋</a>
+    <div class="me"><span>{{ manager.name if manager else 'Менеджер' }}</span>
+      <span class="av"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+      <form method="post" action="/admin/logout" style="margin-left:10px">
+        <button class="btn btn-ghost" type="submit" title="Выйти" style="padding:6px 10px">Выйти</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section id="board" hx-get="/admin/inbox" hx-trigger="load" hx-swap="innerHTML"></section>
+    <aside id="chat">
+      <div class="panel">
+        <div class="panel-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Выберите диалог слева,<br>чтобы открыть переписку</span>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    // Подсветка активного таба + сброс поля поиска при переключении доски.
+    function setTab(el) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      var s = document.querySelector('.search input'); if (s) s.value = '';
+    }
+    // «✕ Сбросить» в результатах поиска: чистим поле и подсвечиваем Инбокс.
+    function clearSearch() {
+      var s = document.querySelector('.search input'); if (s) s.value = '';
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      var inbox = document.querySelector('.tab[data-tab="inbox"]'); if (inbox) inbox.classList.add('active');
+    }
+
+    window.__boardDragging = false;
+    var _suppressCardClickUntil = 0;
+    document.addEventListener('click', function (e) {
+      if (e.target.closest('.drag-handle') || window.__boardDragging || Date.now() < _suppressCardClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
+    document.addEventListener('click', function (e) {
+      if (window.__boardDragging || Date.now() < _suppressCardClickUntil || e.target.closest('.drag-handle, .card-archive, .card-select, .bulk-checkbox')) return;
+      var card = e.target.closest('.card');
+      if (!card) return;
+      document.querySelectorAll('.card.active').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      _chatScroll.atBottom = true;   // открыли новый диалог → показать последние сообщения
+    });
+
+    // Текущее поле ответа в открытом чате.
+    function _composerInput() {
+      return document.querySelector('#chat form.composer textarea[name="text"], #chat form.composer input[name="text"]');
+    }
+    function _resizeComposerInput(inp) {
+      if (!inp || inp.tagName !== 'TEXTAREA') return;
+      inp.style.height = 'auto';
+      inp.style.height = inp.scrollHeight + 'px';
+    }
+    function _focusComposerEnd(inp) {
+      if (!inp) return;
+      inp.focus();
+      var end = inp.value.length;
+      if (typeof inp.setSelectionRange === 'function') inp.setSelectionRange(end, end);
+      _resizeComposerInput(inp);
+    }
+    // Быстрый ответ: подставить (или дополнить) текст в поле ввода.
+    function fillReply(text) {
+      var inp = _composerInput();
+      if (!inp) return;
+      inp.value = inp.value ? (inp.value.trim() + ' ' + text) : text;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      _focusComposerEnd(inp);
+    }
+    // «Предложить ответ»: запросить черновик у ИИ и вставить в поле.
+    async function suggestReply(userId, btn) {
+      var inp = _composerInput();
+      if (!inp) return;
+      var old = btn.textContent; btn.textContent = '…думаю'; btn.disabled = true;
+      try {
+        var r = await fetch('/admin/conversation/' + encodeURIComponent(userId) + '/suggest',
+                            { method: 'POST' });
+        inp.value = (await r.text()).trim();
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        _focusComposerEnd(inp);
+      } catch (_) { /* игнор */ }
+      btn.textContent = old; btn.disabled = false;
+    }
+    document.addEventListener('input', function (e) {
+      if (e.target.matches('#chat form.composer textarea[name="text"]')) _resizeComposerInput(e.target);
+    });
+    document.addEventListener('keydown', function (e) {
+      var inp = e.target.closest && e.target.closest('#chat form.composer textarea[name="text"]');
+      if (!inp || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+      e.preventDefault();
+      var form = inp.closest('form');
+      if (form) form.requestSubmit();
+    });
+    document.body.addEventListener('htmx:afterRequest', function (e) {
+      var form = e.target.closest && e.target.closest('#chat form.composer');
+      if (!form) return;
+      setTimeout(function () { _resizeComposerInput(form.querySelector('textarea[name="text"]')); }, 0);
+    });
+    // Фильтр доски «только требующие ответа».
+    function toggleNeedsReply(stat) {
+      var board = stat.closest('[data-board]');
+      var on = board.classList.toggle('only-needs');
+      stat.classList.toggle('active-filter', on);
+    }
+    function _filterRoot(el) {
+      return el.closest('[data-board]') || el.closest('[data-attention]');
+    }
+    function _applyNoiseFilter(root) {
+      if (!root) root = document.querySelector('#board [data-board], #board [data-attention]');
+      if (!root) return;
+      var on = localStorage.getItem('hideNoise') === '1';
+      root.classList.toggle('hide-noise', on);
+      var btn = root.querySelector('.noise-filter');
+      if (btn) btn.classList.toggle('active-filter', on);
+    }
+    function toggleNoise(el) {
+      var root = _filterRoot(el);
+      var on = !(root && root.classList.contains('hide-noise'));
+      localStorage.setItem('hideNoise', on ? '1' : '0');
+      _applyNoiseFilter(root);
+    }
+    function _activeBoardUrl() {
+      var s = document.querySelector('.search input');
+      if (s && s.value.trim()) return '/admin/search?q=' + encodeURIComponent(s.value.trim());
+      var active = document.querySelector('.tab.active');
+      var funnel = active && active.getAttribute('data-funnel');
+      return funnel ? '/admin/board/' + encodeURIComponent(funnel) : '/admin/inbox';
+    }
+    function refreshCurrentList() {
+      if (window.htmx) htmx.ajax('GET', _activeBoardUrl(), { target: '#board', swap: 'innerHTML' });
+      _pollStats();
+    }
+    function _attentionRoot(el) {
+      return (el && el.closest && el.closest('[data-attention]')) || document.querySelector('[data-attention]');
+    }
+    function _visibleInboxCards(root) {
+      root = root || _attentionRoot();
+      if (!root) return [];
+      return Array.from(root.querySelectorAll('.inbox-list .card')).filter(function (card) {
+        return card.offsetParent !== null;
+      });
+    }
+    function _selectedInboxBoxes(root) {
+      root = root || _attentionRoot();
+      return root ? Array.from(root.querySelectorAll('.bulk-checkbox:checked')) : [];
+    }
+    window.hasInboxSelection = function () {
+      return _selectedInboxBoxes().length > 0;
+    };
+    function updateInboxSelection(el) {
+      var root = _attentionRoot(el);
+      if (!root) return;
+      var count = _selectedInboxBoxes(root).length;
+      var counter = root.querySelector('[data-selected-count]');
+      var bulk = root.querySelector('.bulk-archive');
+      if (counter) counter.textContent = String(count);
+      if (bulk) bulk.disabled = count === 0;
+      root.classList.toggle('has-selection', count > 0);
+    }
+    function selectVisibleInboxCards(el) {
+      var root = _attentionRoot(el);
+      _visibleInboxCards(root).forEach(function (card) {
+        var box = card.querySelector('.bulk-checkbox');
+        if (box) box.checked = true;
+      });
+      updateInboxSelection(root);
+    }
+    function clearInboxSelection(el) {
+      var root = _attentionRoot(el);
+      if (!root) return;
+      root.querySelectorAll('.bulk-checkbox').forEach(function (box) { box.checked = false; });
+      updateInboxSelection(root);
+    }
+    function _replaceAttention(html) {
+      var root = _attentionRoot();
+      if (!root) return;
+      root.outerHTML = html;
+      var fresh = _attentionRoot();
+      if (window.htmx && fresh) htmx.process(fresh);
+      _applyNoiseFilter(fresh);
+      updateInboxSelection(fresh);
+      _pollStats();
+    }
+    async function archiveSelectedInbox(el) {
+      var root = _attentionRoot(el);
+      var ids = _selectedInboxBoxes(root).map(function (box) { return box.value; });
+      if (!ids.length) return;
+      var body = new URLSearchParams();
+      ids.forEach(function (id) { body.append('user_ids', id); });
+      try {
+        var r = await fetch('/admin/conversations/archive', {
+          method: 'POST',
+          headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: body.toString(),
+        });
+        if (r.ok) _replaceAttention(await r.text());
+      } catch (_) { /* следующий автоопрос подтянет состояние */ }
+    }
+    async function archiveNoiseInbox(el) {
+      var n = parseInt((el && el.getAttribute('data-noise-count')) || '0', 10) || 0;
+      if (!n || !confirm('Заархивировать ' + n + ' рекламных/без диалога?')) return;
+      try {
+        var r = await fetch('/admin/conversations/archive-noise', {
+          method: 'POST',
+          headers: { 'HX-Request': 'true' },
+        });
+        if (r.ok) _replaceAttention(await r.text());
+      } catch (_) { /* следующий автоопрос подтянет состояние */ }
+    }
+    async function archiveConversation(userId, ev) {
+      if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      try {
+        var r = await fetch('/admin/conversation/' + encodeURIComponent(userId) + '/archive', {
+          method: 'POST',
+          headers: { 'HX-Request': 'true' },
+        });
+        if (!r.ok) return;
+        refreshCurrentList();
+        var panel = document.querySelector('#chat .panel');
+        if (panel && document.getElementById('composer-' + userId)) {
+          document.getElementById('chat').innerHTML = '<div class="panel"><div class="panel-empty"><span>Диалог архивирован</span></div></div>';
+        }
+      } catch (_) { /* сеть моргнула — следующий автообновление подтянет состояние */ }
+    }
+    // Прокрутка переписки: НЕ дёргаем менеджера вниз, если он листает вверх.
+    // Перед обновлением запоминаем позицию и был ли он у низа; после — восстанавливаем.
+    var _chatScroll = { top: 0, atBottom: true };
+    function _chatScrollEl() {
+      return document.querySelector('#chat .panel-scroll') || document.querySelector('#chat .msgs');
+    }
+    document.body.addEventListener('htmx:beforeSwap', function () {
+      var m = _chatScrollEl();
+      if (m) {
+        _chatScroll.top = m.scrollTop;
+        _chatScroll.atBottom = (m.scrollHeight - m.scrollTop - m.clientHeight) < 60;
+      }
+    });
+    document.body.addEventListener('htmx:afterSwap', function () {
+      var m = _chatScrollEl();
+      if (!m) return;
+      if (_chatScroll.atBottom) {
+        m.scrollTop = m.scrollHeight;     // был внизу → показываем новые сообщения
+      } else {
+        m.scrollTop = _chatScroll.top;    // листал историю → оставляем где был
+      }
+    });
+
+    // ---- Уведомления: бейдж счётчика «ждут ответа» + звук при росте очереди ----
+    var _waiting = null;
+    function _beep() {
+      try {
+        var Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return;
+        var a = new Ctx(), o = a.createOscillator(), g = a.createGain();
+        o.connect(g); g.connect(a.destination); o.type = 'sine'; o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, a.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.18, a.currentTime + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 0.45);
+        o.start(); o.stop(a.currentTime + 0.45);
+      } catch (_) { /* autoplay не разрешён до первого клика — это ок */ }
+    }
+    async function _pollStats() {
+      try {
+        var r = await fetch('/admin/stats', { headers: { 'HX-Request': 'true' } });
+        if (!r.ok) return;
+        var s = await r.json(), n = s.waiting || 0;
+        var badge = document.getElementById('inbox-badge');
+        if (badge) { badge.textContent = n; badge.hidden = (n === 0); }
+        document.title = n > 0 ? '(' + n + ') Frunze — диалоги' : 'Frunze — диалоги';
+        if (_waiting !== null && n > _waiting) _beep();   // в очереди прибавилось → сигнал
+        _waiting = n;
+      } catch (_) { /* сеть моргнула — молча ждём следующего тика */ }
+    }
+    setInterval(_pollStats, 12000); _pollStats();
+
+    // ---- Drag-and-drop: перенос карточки в другую колонку = смена стадии ----
+    function initBoardDnD() {
+      if (typeof Sortable === 'undefined') return;
+      document.querySelectorAll('#board .board .col').forEach(function (col) {
+        if (col._sortable) return;                 // уже инициализирована
+        col._sortable = Sortable.create(col, {
+          group: 'board', draggable: '.card', filter: '.card-archive', preventOnFilter: true, animation: 220, easing: 'cubic-bezier(0.2, 0, 0, 1)',
+          fallbackTolerance: 6,
+          ghostClass: 'card-ghost', fallbackClass: 'card-fallback', forceFallback: true,
+          onStart: function () { _dragging = true; window.__boardDragging = true; },
+          onEnd: onCardMoved,
+        });
+      });
+    }
+    var _dragging = false;
+    async function onCardMoved(evt) {
+      _dragging = false;
+      window.__boardDragging = false;
+      _suppressCardClickUntil = Date.now() + 450;
+      if (evt.to === evt.from) return;             // колонку не сменили
+      var card = evt.item;
+      var toCol = evt.to.closest('.col');
+      var uid = card.getAttribute('data-uid');
+      var stage = toCol && toCol.getAttribute('data-col');
+      if (!uid || !stage) return;
+      try {
+        await fetch('/admin/conversation/' + encodeURIComponent(uid) + '/stage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
+          body: 'stage=' + encodeURIComponent(stage),
+        });
+      } catch (_) { /* офлайн — следующее авто-обновление подтянет истину с сервера */ }
+      // Перерисовать доску: пересчитать счётчики колонок и порядок (ждут дольше — наверх).
+      var board = document.querySelector('#board [data-board]');
+      var funnel = board && board.getAttribute('data-funnel');
+      if (funnel && window.htmx) htmx.ajax('GET', '/admin/board/' + funnel, { target: '#board', swap: 'innerHTML' });
+    }
+    // (Пере)инициализируем DnD после каждой подгрузки доски; не дёргаем во время перетаскивания.
+    document.body.addEventListener('htmx:afterSettle', function () { _applyNoiseFilter(); updateInboxSelection(); if (!_dragging && !window.__boardDragging) initBoardDnD(); });
+    initBoardDnD();
+  </script>
+  <style>
+    [data-board].only-needs .card[data-needs="0"] { display: none; }
+    [data-board].hide-noise .card[data-noise="1"], [data-attention].hide-noise .card[data-noise="1"] { display: none; }
+    .stat.needs-reply.active-filter { outline: 2px solid var(--warm); border-radius: 8px; }
+    .stat.noise-filter.active-filter, .tab.noise-filter.active-filter { outline: 2px solid var(--accent); border-radius: 8px; }
+    .stat.needs-reply .n { color: var(--warm); }
+    .stat.noise-filter .n { color: var(--accent); }
+    .card-archive { position: absolute; top: 6px; right: 6px; z-index: 3; width: 24px; height: 24px;
+                    display: grid; place-items: center; border: 1px solid var(--border); border-radius: 7px;
+                    background: rgba(255,255,255,.92); color: var(--faint); cursor: pointer; opacity: 0;
+                    transition: opacity var(--t), color var(--t), border-color var(--t), background var(--t); }
+    .card:hover .card-archive, .card:focus-within .card-archive { opacity: 1; }
+    .card-archive:hover { color: var(--hot); border-color: rgba(220,38,38,.25); background: var(--hot-soft); }
+    .card-archive svg { width: 13px; height: 13px; }
+    .card-select { position: absolute; top: 6px; right: 34px; z-index: 3; width: 24px; height: 24px;
+                   display: grid; place-items: center; border: 1px solid var(--border); border-radius: 7px;
+                   background: rgba(255,255,255,.92); cursor: pointer; opacity: 0;
+                   transition: opacity var(--t), border-color var(--t), background var(--t); }
+    .card:hover .card-select, .card:focus-within .card-select, .card:has(.bulk-checkbox:checked) .card-select { opacity: 1; }
+    .card-select:hover { border-color: rgba(37,99,235,.28); background: rgba(239,246,255,.96); }
+    .card-select input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .inbox-list .card:has(.bulk-checkbox:checked) { outline: 2px solid var(--accent); outline-offset: 0; }
+    .bulk-archive:disabled, .bulk-noise:disabled { opacity: .45; cursor: default; }
+  </style>
+</body>
+</html>

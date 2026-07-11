@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "id": "AC93B92A1A00E53B3B8DCA319090F90A",
+      "profile_id": "00000000-0000",
+      "wh_type": "incoming_message",
+      "timestamp": "2026-06-23T20:17:58+03:00",
+      "time": 1782235078,
+      "body": "Добрый день",
+      "type": "chat",
+      "from": "996555000101@c.us",
+      "to": "996555000900@c.us",
+      "chatId": "996555000101@c.us",
+      "senderName": "Al",
+      "is_me": false,
+      "chat_type": "dialog",
+      "platform": "whatsapp"
+    }
+  ]
+}

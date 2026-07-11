@@ -1,0 +1,138 @@
+{# Чат: статус бота + бриф + полный контекст + перехват + ответ. Авто-обновление 4с
+   (поле ввода сохраняется через hx-preserve — текст и фокус не слетают при опросе). #}
+<div class="panel" hx-get="/admin/conversation/{{ c.user_id }}" hx-trigger="every 4s [document.visibilityState==='visible' && !(document.activeElement && document.activeElement.closest('.composer'))]" hx-swap="outerHTML" hx-target="this">
+  <div class="ph-head">
+    <span class="avatar" style="background: {{ avatar }}">{{ initials }}</span>
+    <div class="meta">
+      <div class="nm">{{ c.qualification.get('name') or c.phone }}</div>
+      <div class="ph-sub">
+        <span class="tag">{{ c.phone }}</span>
+        <span class="tag">{{ c.channel or '—' }}</span>
+        <span class="tag">{{ c.funnel or '—' }} · {{ c.stage }}</span>
+        <span class="tag temp-{{ c.lead_temperature }}">{{ {'new':'новый','warm':'тёплый','hot':'горячий'}.get(c.lead_temperature, c.lead_temperature) }}</span>
+      </div>
+    </div>
+  </div>
+
+  {% if busy_by %}
+  <div class="status" style="background:var(--warm-soft);color:var(--warm)">
+    ⚠ Диалог уже ведёт менеджер <b>{{ busy_by }}</b> — действуйте аккуратно
+  </div>
+  {% elif c.assigned_to %}
+  <div class="status active">
+    🔒 Ведёт: {{ c.assigned_to }}{% if c.assigned_to == manager.login %} (вы){% endif %}
+  </div>
+  {% endif %}
+
+  <div class="ph-actions">
+    {% if c.intercepted %}
+      <div class="status paused">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        Бот на паузе — диалог ведёт менеджер
+      </div>
+      <button class="btn btn-ghost" hx-post="/admin/conversation/{{ c.user_id }}/release" hx-target="#chat" hx-swap="innerHTML">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 0 1 4 4v2"/></svg>
+        Вернуть боту
+      </button>
+    {% else %}
+      <div class="status active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+        Бот ведёт диалог
+      </div>
+      <button class="btn btn-danger" hx-post="/admin/conversation/{{ c.user_id }}/takeover" hx-target="#chat" hx-swap="innerHTML">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2a8 8 0 0 1-7-4l-2-3"/></svg>
+        Перехватить (бот замолчит)
+      </button>
+    {% endif %}
+    <button type="button" class="btn btn-ghost" onclick="archiveConversation('{{ c.user_id }}', event)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+      Архивировать
+    </button>
+  </div>
+
+  <div class="panel-scroll">
+  <div class="outcome-bar" style="display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap">
+    <span style="color:var(--muted);font-size:12px">Исход:</span>
+    {% for key, label in outcomes %}
+    <button class="btn {% if c.outcome == key %}btn-brand{% else %}btn-ghost{% endif %}"
+            style="padding:5px 10px;font-size:13px"
+            hx-post="/admin/conversation/{{ c.user_id }}/outcome" hx-vals='{"outcome":"{{ key }}"}'
+            hx-target="#chat" hx-swap="innerHTML">{{ label }}</button>
+    {% endfor %}
+  </div>
+
+  {% if c.ai_summary or c.manager_next_step or c.escalation_reason %}
+  <div class="brief manager-brief">
+    <div class="brief-title">AI для менеджера</div>
+    {% if c.ai_summary %}
+    <div class="brief-row"><span class="k">Контекст</span><span>{{ c.ai_summary }}</span></div>
+    {% endif %}
+    {% if c.manager_next_step %}
+    <div class="brief-row"><span class="k">Следующий шаг</span><span>{{ c.manager_next_step }}</span></div>
+    {% endif %}
+    {% if c.escalation_reason %}
+    <div class="brief-row"><span class="k">Почему важно</span><span>{{ c.escalation_reason }}</span></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if c.qualification %}
+  <div class="brief">
+    <div class="brief-title">Что узнал бот</div>
+    {% for k, v in c.qualification.items() %}
+    <div class="brief-row"><span class="k">{{ k }}</span><span>{{ v }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <details class="chat-details" open>
+  <summary style="cursor:pointer;color:var(--muted);font-size:12px;margin:6px 0;user-select:none">
+    Переписка ({{ c.messages|length }})
+  </summary>
+  <div class="msgs" id="msgs-{{ c.user_id }}">
+    {% for m in c.messages %}
+    <div class="msg {{ m.sender }}">
+      <div class="who">{{ {'client':'Клиент','bot':'Бот','manager':'Менеджер'}.get(m.sender, m.sender) }}{% if m.created_at %} · {{ m.created_at.strftime('%H:%M') }}{% endif %}
+        {% if m.status %}
+          {% if m.status == 'pending' %}<span title="отправляется">⏳</span>
+          {% elif m.status == 'sent' %}<span title="отправлено">✓</span>
+          {% elif m.status == 'delivered' %}<span title="доставлено">✓✓</span>
+          {% elif m.status == 'failed' %}<span title="не доставлено" style="color:var(--hot)">✗ не доставлено</span>
+            <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px"
+                    hx-post="/admin/conversation/{{ c.user_id }}/resend/{{ m.id }}"
+                    hx-target="#chat" hx-swap="innerHTML">Повторить</button>
+          {% endif %}
+        {% endif %}
+      </div>
+      <div class="bubble">{{ m.text }}</div>
+    </div>
+    {% else %}
+    <div class="msgs-empty">Сообщений пока нет</div>
+    {% endfor %}
+  </div>
+  </details>
+
+  {# Быстрые ответы + черновик от ИИ. Кнопки подставляют текст в поле ниже (JS из boards.html). #}
+  <div class="quick-replies" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px">
+    {% for label, text in quick_replies.items() %}
+    <button type="button" class="btn btn-ghost" style="padding:4px 9px;font-size:12px"
+            onclick="fillReply(this.dataset.t)" data-t="{{ text|e }}">{{ label }}</button>
+    {% endfor %}
+    <button type="button" class="btn btn-ghost" style="padding:4px 9px;font-size:12px"
+            onclick="suggestReply('{{ c.user_id }}', this)">✨ Предложить ответ</button>
+  </div>
+
+  {# id уникален на диалог: при опросе того же чата поле сохраняется (hx-preserve),
+     а при переключении на другой диалог рендерится свежее пустое поле. #}
+  </div>
+  <form class="composer" id="composer-{{ c.user_id }}" hx-preserve="true"
+        hx-post="/admin/conversation/{{ c.user_id }}/send"
+        hx-target="#chat" hx-swap="innerHTML" hx-on::after-request="this.reset()">
+    <textarea name="text" rows="2" placeholder="Ответить клиенту…" autocomplete="off" aria-label="Ответить клиенту"></textarea>
+    <button class="btn btn-brand" type="submit" aria-label="Отправить">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      Отправить
+    </button>
+  </form>
+  <div class="hint">Отправка ответа перехватывает диалог — бот замолкает.</div>
+</div>

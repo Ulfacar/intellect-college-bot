@@ -1,0 +1,16 @@
+# Frunze Travel Bot — зависимости (MVP)
+fastapi==0.115.*
+uvicorn[standard]==0.30.*
+aiogram==3.*
+httpx==0.27.*
+pydantic>=2.8,<3      # <2.8 ломает aiogram 3.x ("name 'Default' is not defined")
+pydantic-settings>=2.2,<3
+sqlalchemy[asyncio]==2.*
+asyncpg==0.29.*
+alembic==1.13.*
+redis==5.*
+python-dotenv==1.*
+jinja2==3.*             # шаблоны админ-панели (канбан + чат)
+python-multipart==0.0.* # парсинг форм: ответ менеджера из панели + form-urlencoded вебхук Bitrix
+itsdangerous==2.*       # подпись cookie-сессии (Starlette SessionMiddleware, логин менеджеров)
+aiosqlite==0.20.*       # dev/тесты: async SQLite вместо сетевого Postgres

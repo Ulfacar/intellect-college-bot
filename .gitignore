@@ -1,0 +1,40 @@
+# --- Секреты и окружение ---
+.env
+.env.local
+*.env
+!.env.example
+
+# --- ЛИЧНЫЕ ДАННЫЕ КЛИЕНТОВ (НЕ КОММИТИТЬ) ---
+# Скрины реальных переписок с номерами родителей — только локально
+WhatsApp Image*.jpeg
+WhatsApp Image*.jpg
+*.jpeg
+*.jpg
+*.png
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- БД / состояние ---
+*.db
+*.sqlite3
+data/
+
+# --- BMAD-тулинг (не часть продукта) ---
+_bmad/
+_bmad-output/
+.claude/skills/
+
+# --- IDE / ОС ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

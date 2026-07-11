@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frunze — аналитика</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#F1F5F9; --surface:#FFFFFF; --elev:#F1F5F9; --border:#E2E8F0; --text:#0F172A;
+            --muted:#64748B; --accent:#2563EB; --warm:#D97706; --hot:#DC2626; --green:#059669;
+            --mono:'Fira Code', ui-monospace, monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Fira Sans',system-ui,sans-serif; font-size:14px; }
+    .topbar { display:flex; align-items:center; gap:16px; padding:0 20px; height:58px;
+              background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; }
+    .topbar a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .wrap { padding:22px; max-width:1100px; margin:0 auto; }
+    h1 { font-size:20px; margin:0 0 4px; }
+    .sub { color:var(--muted); margin:0 0 22px; font-size:13px; }
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:24px; }
+    .kpi { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px 18px; }
+    .kpi .n { font-family:var(--mono); font-size:30px; font-weight:700; letter-spacing:-.02em; }
+    .kpi .l { color:var(--muted); font-size:12.5px; margin-top:4px; }
+    .kpi.good .n { color:var(--green); } .kpi.warm .n { color:var(--warm); }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; margin-bottom:18px; }
+    .panel h2 { font-size:14px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    table { width:100%; border-collapse:collapse; }
+    td, th { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); font-size:13px; }
+    th { color:var(--muted); font-weight:500; }
+    .pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:12px; background:var(--elev); }
+    .muted { color:var(--muted); }
+    /* Фильтр периода */
+    .periods { display:flex; gap:6px; margin:0 0 20px; }
+    .periods a { padding:6px 13px; border-radius:9px; border:1px solid var(--border); background:var(--surface);
+                 color:var(--muted); font-size:13px; font-weight:600; }
+    .periods a.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+    /* Мини-график активности (CSS-бары) */
+    .chart { display:flex; align-items:flex-end; gap:10px; height:130px; padding-top:8px; }
+    .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end; }
+    .bar { width:100%; max-width:46px; background:linear-gradient(180deg,#2563EB,#1D4ED8); border-radius:6px 6px 0 0;
+           min-height:3px; position:relative; transition:height .3s; }
+    .bar .v { position:absolute; top:-18px; left:0; right:0; text-align:center; font-family:var(--mono);
+              font-size:11px; font-weight:700; color:var(--text); }
+    .bar-col .d { font-size:11px; color:var(--muted); font-family:var(--mono); }
+    /* Горизонтальные бары исходов */
+    .obar { display:grid; grid-template-columns:120px 1fr 40px; align-items:center; gap:10px; margin-bottom:8px; }
+    .obar .track { background:var(--elev); border-radius:6px; height:18px; overflow:hidden; }
+    .obar .fill { height:100%; border-radius:6px; }
+    .obar .n { font-family:var(--mono); font-weight:700; text-align:right; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/admin">← Доски</a>
+    <b>Аналитика — ИИ vs менеджер</b>
+    <span style="flex:1"></span>
+    <span class="muted">{{ manager.name }}</span>
+  </header>
+  <div class="wrap">
+    <h1>Сводка по {{ a.total }} диалогам</h1>
+    <p class="sub">Containment = доля диалогов, которые бот провёл без менеджера. Время — медиана по сообщениям.</p>
+
+    <div class="periods">
+      {% for key, label in periods %}
+      <a href="/admin/analytics?period={{ key }}" class="{% if key == period %}on{% endif %}">{{ label }}</a>
+      {% endfor %}
+    </div>
+
+    <div class="cards">
+      <div class="kpi good"><div class="n">{{ a.containment_rate }}%</div><div class="l">Containment (бот без менеджера)</div></div>
+      <div class="kpi"><div class="n">{{ a.contained }}/{{ a.total }}</div><div class="l">Диалогов вёл только бот</div></div>
+      <div class="kpi good"><div class="n">{{ a.outcomes.get('won', 0) }}</div><div class="l">✅ Оплатили</div></div>
+      <div class="kpi"><div class="n">{{ a.outcomes.get('office', 0) }}</div><div class="l">🏢 Дошли в офис</div></div>
+      <div class="kpi warm"><div class="n">{{ a.outcomes.get('lost', 0) }}</div><div class="l">❌ Слились</div></div>
+      <div class="kpi"><div class="n">{{ a.avg_response_min if a.avg_response_min is not none else '—' }}{% if a.avg_response_min is not none %} мин{% endif %}</div><div class="l">Среднее время ответа менеджера</div></div>
+      <div class="kpi"><div class="n">{{ a.avg_handoff_min if a.avg_handoff_min is not none else '—' }}{% if a.avg_handoff_min is not none %} мин{% endif %}</div><div class="l">Среднее время до подключения менеджера</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Активность за 7 дней</h2>
+      {% if a.activity %}
+      <div class="chart">
+        {% for d in a.activity %}
+        <div class="bar-col">
+          <div class="bar" style="height:{{ d.pct }}%"><span class="v">{{ d.count or '' }}</span></div>
+          <div class="d">{{ d.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="muted">Нет данных</div>{% endif %}
+    </div>
+
+    <div class="panel">
+      <h2>Исходы</h2>
+      {% set colors = {'won':'#059669','office':'#2563EB','manager':'#D97706','lost':'#DC2626','in_progress':'#94A3B8'} %}
+      {% for key, label in [('won','✅ Оплатил'),('office','🏢 Дошёл в офис'),('manager','👤 У менеджера'),('lost','❌ Слился'),('in_progress','⏳ В работе')] %}
+      {% set n = a.outcomes.get(key, 0) %}
+      <div class="obar">
+        <span>{{ label }}</span>
+        <span class="track"><span class="fill" style="width:{{ (100 * n / a.total)|round if a.total else 0 }}%;background:{{ colors[key] }}"></span></span>
+        <span class="n">{{ n }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="panel">
+      <h2>По менеджерам</h2>
+      {% if a.by_manager %}
+      <table>
+        <tr><th>Менеджер</th><th>Вёл диалогов</th><th>✅ Оплат</th><th>🏢 Офис</th><th>❌ Слив</th></tr>
+        {% for mgr, st in a.by_manager.items() %}
+        <tr><td><b>{{ mgr }}</b></td><td>{{ st.get('handled', 0) }}</td>
+            <td>{{ st.get('won', 0) }}</td><td>{{ st.get('office', 0) }}</td><td>{{ st.get('lost', 0) }}</td></tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="muted">Пока никто из менеджеров не вёл диалоги в этом периоде</div>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h2>Воронки по стадиям</h2>
+      {% for funnel, stages in a.by_funnel.items() %}
+      <div style="margin-bottom:10px">
+        <b>{{ funnel }}</b>
+        {% for stage, n in stages.items() %}
+        <span class="pill">{{ stage }}: {{ n }}</span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="muted">Нет данных</div>
+      {% endfor %}
+    </div>
+
+    <div class="panel">
+      <h2>Почему подключают менеджера (топ причин)</h2>
+      {% if a.handoff_reasons %}
+      <table>
+        {% for reason, n in a.handoff_reasons %}
+        <tr><td>{{ reason }}</td><td>{{ n }}</td></tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="muted">Пока нет эскалаций</div>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

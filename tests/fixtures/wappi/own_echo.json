@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "id": "ECHO0000000000000000000000000001",
+      "profile_id": "00000000-0000",
+      "wh_type": "incoming_message",
+      "body": "Здравствуйте! Меня зовут Медина",
+      "type": "chat",
+      "from": "996555000900@c.us",
+      "to": "996555000101@c.us",
+      "chatId": "996555000101@c.us",
+      "is_me": true,
+      "chat_type": "dialog",
+      "platform": "whatsapp"
+    }
+  ]
+}

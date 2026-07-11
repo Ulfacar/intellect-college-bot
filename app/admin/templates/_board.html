@@ -1,0 +1,79 @@
+{# Доска: метрики + колонки канбана. Авто-обновление каждые 15с (только на видимой вкладке). #}
+<div hx-get="/admin/board/{{ funnel }}" hx-trigger="every 15s [document.visibilityState==='visible' && !window.__boardDragging]" hx-swap="outerHTML" hx-target="this" data-board data-funnel="{{ funnel }}">
+  <div class="metrics">
+    <div class="stat"><div class="n">{{ metrics.total }}</div><div class="l">Всего диалогов</div></div>
+    <div class="stat waiting"><div class="n">{{ metrics.waiting }}</div><div class="l">Ждут ответа</div></div>
+    <div class="stat needs-reply" onclick="toggleNeedsReply(this)" title="Показать только требующие ответа" style="cursor:pointer">
+      <div class="n">{{ metrics.needs_reply }}</div><div class="l">Требуют ответа ⚑</div></div>
+    <div class="stat silent"><div class="n">{{ metrics.silent }}</div><div class="l">Молчат</div></div>
+    <div class="stat noise-filter" onclick="toggleNoise(this)" title="Скрыть рекламу и диалоги без переписки" style="cursor:pointer">
+      <div class="n">{{ metrics.noise }}</div><div class="l">Скрыть рекламу/без диалога</div></div>
+    <div class="stat intercepted"><div class="n">{{ metrics.intercepted }}</div><div class="l">Перехвачено</div></div>
+  </div>
+
+  <div class="board">
+    {% for col in columns %}
+    <div class="col {% if col.is_empty %}empty{% endif %}" data-col="{{ col.key }}">
+      <div class="col-head">
+        <span class="col-title"><span class="dot"></span>{{ col.label }}</span>
+        <span class="count">{{ col.cards|length }}</span>
+      </div>
+      {% for c in col.cards %}
+      <div class="card" tabindex="0" data-wait="{{ c.wait_level }}" data-needs="{{ '1' if c.needs_reply else '0' }}" data-noise="{{ '1' if c.is_noise else '0' }}"
+           data-uid="{{ c.user_id }}"
+           hx-get="/admin/conversation/{{ c.user_id }}" hx-target="#chat" hx-swap="innerHTML">
+        <button type="button" class="card-archive" title="Архивировать"
+                onclick="archiveConversation('{{ c.user_id }}', event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+        </button>
+        <div class="card-top">
+          <span class="avatar" style="background: {{ c.avatar }}">{{ c.initials }}</span>
+          <div class="card-id">
+            <div class="nm">{{ c.name }}</div>
+            {% if c.name != c.phone %}<div class="ph">{{ c.phone }}</div>{% endif %}
+          </div>
+        </div>
+        {% if c.last_text %}
+        <div class="last"><b>{{ {'client':'Клиент','bot':'Бот','manager':'Вы'}.get(c.last_sender, '') }}{% if c.last_sender %}: {% endif %}</b>{{ c.last_text }}</div>
+        {% endif %}
+        <div class="card-foot">
+          <span class="time">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            {{ c.time_label }}
+          </span>
+          {% if c.wait_level in ('warm','hot') %}
+          <span class="badge wait-{{ c.wait_level }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2 2"/></svg>
+            ждёт {{ c.wait_label }}
+          </span>
+          {% endif %}
+          {% if c.lead_temperature == 'hot' %}
+          <span class="badge hot-lead">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 17h2a2.5 2.5 0 0 0 2.5-2.5c0-1.7-1.2-2.4-2.8-3.2-1.5-.8-2.7-1.5-2.7-3.1A2.2 2.2 0 0 1 12.2 6h1.4A2.4 2.4 0 0 1 16 8.4"/><path d="M12 3v3"/><path d="M12 17v4"/></svg>
+            горячий
+          </span>
+          {% endif %}
+          {% if c.needs_reply %}
+          <span class="badge wait-hot">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+            ваш ход
+          </span>
+          {% endif %}
+          {% if c.is_silent %}
+          <span class="badge silent">молчит {{ c.time_label }}</span>
+          {% endif %}
+          {% if c.intercepted %}
+          <span class="badge intercepted push">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            перехвачен
+          </span>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      {% if not col.is_empty %}<div class="col-empty">—</div>{% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>

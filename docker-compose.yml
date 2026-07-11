@@ -1,0 +1,75 @@
+# Frunze Travel Bot — прод-стек: приложение + Postgres + Redis.
+# Coolify даёт reverse-proxy + TLS поверх сервиса `app` (порт 8000), поэтому
+# nginx/Let's Encrypt здесь не нужны. Секреты — из .env (см. .env.example).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Frunze Travel Bot}
+      LLM_MODEL_MAIN: ${LLM_MODEL_MAIN:-anthropic/claude-3.5-sonnet}
+      LLM_MODEL_CHEAP: ${LLM_MODEL_CHEAP:-anthropic/claude-3-haiku}
+      WAPPI_BASE_URL: ${WAPPI_BASE_URL:-https://wappi.pro}
+      WAPPI_TOKEN: ${WAPPI_TOKEN:-}
+      WAPPI_PROFILE_ID: ${WAPPI_PROFILE_ID:-}
+      BOTS: ${BOTS:-[{"id":"frunze_tours","scenario":"tours","title":"FrunzeTravel2","wappi_profile_id":"00000000-0000"},{"id":"getvisa","scenario":"visa","title":"GetVisa","wappi_profile_id":"00000000-0000"}]}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOTS: ${TELEGRAM_BOTS:-[]}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      TOURVISOR_LOGIN: ${TOURVISOR_LOGIN:-}
+      TOURVISOR_PASS: ${TOURVISOR_PASS:-}
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/frunze
+      REDIS_URL: redis://redis:6379/0
+      CRM_BACKEND: ${CRM_BACKEND:-postgres}
+      BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL:-}
+      BITRIX_CATEGORY_BY_FUNNEL: ${BITRIX_CATEGORY_BY_FUNNEL:-{}}
+      BITRIX_STAGE_MAP: ${BITRIX_STAGE_MAP:-{}}
+      STATE_BACKEND: ${STATE_BACKEND:-redis}
+      PANEL_BACKEND: ${PANEL_BACKEND:-postgres}
+      ADMIN_ENABLED: ${ADMIN_ENABLED:-true}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      MANAGERS: ${MANAGERS:-[]}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-frunze-session-secret}
+      DEMO_LOGIN: ${DEMO_LOGIN:-false}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: frunze
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d frunze"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]  # персистентность сессий между рестартами
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:

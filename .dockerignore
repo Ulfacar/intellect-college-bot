@@ -1,0 +1,19 @@
+# Не тащим в образ лишнее
+.git
+.gitignore
+.env
+.env.example
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+tests
+docs
+design-artifacts
+_bmad
+_bmad-output
+*.md
+HANDOVER.md
+plans

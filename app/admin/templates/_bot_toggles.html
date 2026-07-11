@@ -1,0 +1,26 @@
+{# Per-bot тумблеры авто-ответов. Секция свапается целиком после HTMX POST. #}
+<div id="bot-toggles" class="panel">
+  <h2>Боты — включить по отдельности</h2>
+  <div class="t-desc" style="margin-bottom:12px">
+    Главный рубильник задаёт общий режим; тумблер бота переопределяет его для конкретного бота, а нетронутый бот наследует общий режим.
+  </div>
+  {% for b in bot_flags %}
+  <div class="toggle-row"{% if not loop.first %} style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px"{% endif %}>
+    <label class="switch" title="Включить/выключить авто-ответы этого бота">
+      <input type="checkbox" {{ 'checked' if b.on else '' }}
+             hx-post="/admin/bots/{{ b.id }}/toggle" hx-target="#bot-toggles" hx-swap="outerHTML"
+             hx-vals='{"on": "{{ 0 if b.on else 1 }}"}'>
+      <span class="slider"></span>
+    </label>
+    <div class="toggle-text">
+      <div class="t-title">
+        {{ b.channel }} · {{ b.scenario_label }} · <span class="mono">{{ b.id }}</span> —
+        <span class="state {{ 'on' if b.on else 'off' }}">{{ 'ВКЛ' if b.on else 'ВЫКЛ' }}</span>
+      </div>
+      <div class="t-desc">
+        {{ b.title }}{% if b.profile %}; профиль/номер: <span class="mono">{{ b.profile }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>

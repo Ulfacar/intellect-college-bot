@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "id": "A51FA81636AD399DE1B3EDA6D3269CCB",
+      "profile_id": "00000000-0000",
+      "wh_type": "incoming_message",
+      "timestamp": "2026-06-23T20:17:42+03:00",
+      "time": 1782235062,
+      "body": "👍🏻",
+      "type": "reaction",
+      "from": "996555000101@c.us",
+      "to": "996555000900@c.us",
+      "chatId": "996555000900-1568813854@g.us",
+      "senderName": "Test User",
+      "contact_name": "Test Group",
+      "is_me": false,
+      "chat_type": "group",
+      "platform": "whatsapp"
+    }
+  ]
+}
