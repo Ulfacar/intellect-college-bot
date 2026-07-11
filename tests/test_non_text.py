@@ -1,4 +1,4 @@
-"""Не-текст (голос/фото/медиа): бот честно отвечает, а не молчит.
+﻿"""Не-текст (голос/фото/медиа): бот честно отвечает, а не молчит.
 
 Тестируем поведение оркестратора (без импорта telegram-адаптера, который тянет aiogram).
 """
@@ -51,3 +51,4 @@ def test_telegram_parse_text_is_text():
     adapter.channel = "telegram"
     msg = asyncio.run(TelegramAdapter.parse(adapter, raw))
     assert msg.kind == "text" and msg.text == "привет"
+

@@ -12,13 +12,13 @@ from datetime import datetime, timedelta, timezone
 STAGE_TO_COLUMN = {
     "greeting": "greeting", "new": "greeting",
     "qualification": "qualification",
-    "progress": "progress", "scoring": "progress", "search": "progress", "visa_scoring": "progress",
-    "office": "office", "office_consultation": "office",
+    "consulting": "progress", "progress": "progress",
+    "test_invite": "office", "office": "office", "office_consultation": "office",
     "manager": "manager", "manager_handoff": "manager",
     "follow_up": "follow_up", "followup": "follow_up", "callback": "follow_up",
 }
 
-HUMAN_STAGES = {"office", "office_consultation", "manager", "manager_handoff"}
+HUMAN_STAGES = {"office", "office_consultation", "test_invite", "manager", "manager_handoff"}
 NOISE_STAGES = {"greeting", "new"}
 SILENT_EXCLUDED_COLUMNS = {"office", "manager", "follow_up"}
 TERMINAL_OUTCOMES = {"won", "lost"}

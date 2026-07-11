@@ -29,18 +29,17 @@ log = logging.getLogger("admin")
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-# Доски (вкладки) — по воронкам. Визы и Туры основные, Билеты — третья.
-FUNNELS = [("visa", "Визы"), ("tours", "Туры"), ("tickets", "Билеты")]
-# Короткие ярлыки воронок для бейджа в инбоксе/поиске (где смешаны все воронки).
-FUNNEL_LABELS = {"visa": "Визы", "tours": "Туры", "tickets": "Билеты"}
+# Доска приёмной комиссии.
+FUNNELS = [("admission", "Абитуриенты")]
+FUNNEL_LABELS = {"admission": "Приёмная"}
 FAQ_TABS = FUNNELS + [("common", "Общие")]
 
 # Колонки канбана и маппинг внутренних стадий диалога в колонку.
 BOARD_COLUMNS = [
-    ("greeting", "Новый"),
+    ("greeting", "Новые лиды"),
     ("qualification", "Квалификация"),
-    ("progress", "Подбор / оценка"),
-    ("office", "В офис / консультация"),
+    ("progress", "Консультация"),
+    ("office", "Приглашён на тест"),
     ("manager", "У менеджера"),
     ("silent", "Молчат (на дожим)"),
     ("follow_up", "Повторное касание"),
@@ -63,7 +62,14 @@ WAIT_WARM_MIN = 5    # клиент ждёт дольше — карточка �
 WAIT_HOT_MIN = 20    # ждёт долго — горит
 
 # Исходы диалога для ручной отметки менеджером.
-OUTCOMES = [("won", "✅ Оплатил"), ("office", "🏢 Дошёл в офис"), ("lost", "❌ Слился")]
+OUTCOMES = [("won", "🎓 Поступает"), ("office", "📝 Пришёл на тест"), ("lost", "❌ Слив")]
+QUALIFICATION_LABELS = {
+    "name": "Имя",
+    "grade_base": "База (после класса)",
+    "direction": "Направление",
+    "visit_time": "Удобное время (тест)",
+    "escalation_reason": "Причина эскалации",
+}
 
 
 def _now() -> datetime:
@@ -138,8 +144,37 @@ def _card_model(conv, now: datetime) -> dict:
         "is_noise": noise,
         "is_silent": silent,
         "lead_temperature": conv.lead_temperature,
+        "qualification_line": _qualification_line(conv.qualification),
         "sort_key": (wait_min if wait_min is not None else -1),
     }
+
+
+def _grade_label(value: str | None) -> str:
+    if value == "9":
+        return "после 9 класса"
+    if value == "11":
+        return "после 11 класса"
+    return value or ""
+
+
+def _qualification_line(q: dict | None) -> str:
+    q = q or {}
+    parts = [_grade_label(q.get("grade_base")), q.get("direction") or ""]
+    return " · ".join(p for p in parts if p)
+
+
+def _qualification_rows(q: dict | None) -> list[tuple[str, str]]:
+    q = q or {}
+    ordered = ["name", "grade_base", "direction", "visit_time", "escalation_reason"]
+    keys = ordered + [k for k in q if k not in ordered]
+    rows: list[tuple[str, str]] = []
+    for key in keys:
+        if key not in q:
+            continue
+        value = _grade_label(q.get(key)) if key == "grade_base" else str(q.get(key) or "")
+        if value:
+            rows.append((QUALIFICATION_LABELS.get(key, key), value))
+    return rows
 
 
 # ---------------- авторизация (сессия менеджера) ----------------
@@ -298,7 +333,7 @@ FEATURE_FLAGS = {
     "bots_enabled": {
         "title": "Авто-ответы бота (главный рубильник)",
         "desc": ("Если выключить — бот перестаёт отвечать клиентам во всех воронках "
-                 "(туры / визы / билеты). Входящие сообщения по-прежнему попадают в панель, "
+                 "приёмной. Входящие сообщения по-прежнему попадают в панель, "
                  "и менеджеры ведут диалоги вручную. Включите обратно, чтобы бот снова "
                  "отвечал автоматически."),
         "default": lambda: True,
@@ -337,7 +372,7 @@ async def _flag_views() -> list[dict]:
     return views
 
 
-SCENARIO_LABELS = {"tours": "туры", "visa": "визы", "tickets": "билеты"}
+SCENARIO_LABELS = {"admission": "Приёмная"}
 
 
 async def _bot_flag_views() -> list[dict]:
@@ -413,11 +448,11 @@ def _faq_scope(scope: str) -> str | None:
 
 
 @router.get("/faq", response_class=HTMLResponse)
-async def faq_page(request: Request, scope: str = "visa",
+async def faq_page(request: Request, scope: str = "admission",
                    manager: dict = Depends(require_admin)):
     """Редактор FAQ-правил: детерминированные ответы до LLM."""
     from app.core.faq import get_faq_store
-    scope = scope if scope in {"visa", "tours", "tickets", "common"} else "visa"
+    scope = scope if scope in {"admission", "common"} else "admission"
     store = get_faq_store()
     rows = await store.list(scope)
     edit_id = int(request.query_params.get("edit") or 0)
@@ -479,7 +514,7 @@ async def faq_test(request: Request, manager: dict = Depends(require_admin),
                    scope: str = Form("common"), text: str = Form("")):
     """Проверить фразу через тот же матчинг, без отправки клиенту."""
     from app.core.faq import get_faq_store, match_faq
-    scope = scope if scope in {"visa", "tours", "tickets", "common"} else "common"
+    scope = scope if scope in {"admission", "common"} else "common"
     funnel = _faq_scope(scope)
     store = get_faq_store()
     entries = await store.candidates(funnel)
@@ -578,6 +613,8 @@ async def _render_conversation(user_id: str, request: Request, manager: dict):
         "busy_by": busy_by,
         "outcomes": OUTCOMES,
         "quick_replies": quick_replies_for(conv.funnel),
+        "qualification_rows": _qualification_rows(conv.qualification),
+        "stage_label": dict(BOARD_COLUMNS).get(STAGE_TO_COLUMN.get(conv.stage, ""), conv.stage),
     })
 
 
@@ -719,10 +756,10 @@ async def suggest_reply(user_id: str, request: Request, _: dict = Depends(requir
                for m in conv.messages if m.text]
     if not history or history[-1]["role"] != "user":
         history.append({"role": "user", "content": "(Предложи уместный следующий шаг.)"})
-    persona = "Frunze Travel (Медина, визовый эксперт)" if conv.funnel == "visa" else "Frunze Travel (Адеми)"
+    persona = "приёмная комиссия Intellect IT & Business College"
     system = (
         f"Ты — менеджер {persona}. Предложи ОДИН следующий ответ клиенту по контексту "
-        f"переписки: тепло, кратко, по-русски, в стиле бренда, без выдуманных цен. "
+        f"переписки: тепло, кратко, по-русски, без выдуманных фактов. "
         f"Контекст для тебя: {conv.ai_summary or '—'}. Следующий шаг: {conv.manager_next_step or '—'}. "
         f"Верни ТОЛЬКО текст ответа клиенту, без пояснений."
     )

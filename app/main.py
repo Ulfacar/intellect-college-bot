@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
         await scheduler.stop()
 
 
-app = FastAPI(title="Frunze Travel Bot", lifespan=lifespan)
+app = FastAPI(title="Intellect College Bot", lifespan=lifespan)
 # Сессии менеджеров (подписанная cookie) — для логина в админ-панель.
 # https_only=True ставит Secure-флаг (TLS терминирует nginx, ходим по https);
 # same_site=lax — базовая защита от CSRF.

@@ -1,17 +1,10 @@
-"""Реестр воронок."""
+"""Funnel registry."""
 from __future__ import annotations
 
-from app.funnels.base import Funnel
-from app.funnels.tickets import TicketsFunnel
-from app.funnels.tours import ToursFunnel
-from app.funnels.visa import VisaFunnel
+from app.funnels.admission import AdmissionFunnel
 
-_FUNNELS: dict[str, Funnel] = {
-    "tours": ToursFunnel(),
-    "visa": VisaFunnel(),
-    "tickets": TicketsFunnel(),
-}
+_FUNNELS = {"admission": AdmissionFunnel()}
 
 
-def get_funnel(name: str) -> Funnel:
-    return _FUNNELS[name]
+def get_funnel(name: str | None):
+    return _FUNNELS.get(name or "admission", _FUNNELS["admission"])

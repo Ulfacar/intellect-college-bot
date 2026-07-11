@@ -1,4 +1,4 @@
-"""Contract-тесты: парсер Wappi против РЕАЛЬНЫХ payload'ов (захвачены из прода).
+﻿"""Contract-тесты: парсер Wappi против РЕАЛЬНЫХ payload'ов (захвачены из прода).
 
 Фиксируют фактический формат `{"messages":[...]}` и поведение фильтров навсегда —
 именно расхождение с этим форматом однажды заставило бота молчать на все сообщения.
@@ -51,3 +51,4 @@ def test_real_delivery_status_parsed():
     provider_msg_id, status = parse_delivery_status(ev)
     assert provider_msg_id == "AC93B92A1A00E53B3B8DCA319090F90A"
     assert status == "delivered"
+

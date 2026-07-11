@@ -1,4 +1,4 @@
-"""Тесты бэкендов хранилища состояний (in-memory и Redis).
+﻿"""Тесты бэкендов хранилища состояний (in-memory и Redis).
 
 RedisStateStore проверяем на фейковом клиенте (dict с TTL) — без реального Redis:
 интересует сериализация DialogState ↔ JSON и контракт load/save, не сетевой слой.
@@ -26,8 +26,8 @@ class FakeRedis:
 def test_dialog_state_json_round_trip():
     """to_json/from_json сохраняют все поля, включая историю и флаг перехвата."""
     state = DialogState(
-        user_id="u1", funnel="visa", stage="scoring",
-        qualification={"country": "Германия", "prior_visas": "да"},
+        user_id="u1", funnel="admission", stage="scoring",
+        qualification={"country": "9", "prior_admissions": "да"},
         deal_id="42", history=[{"role": "user", "content": "привет"}],
         intercepted=True,
     )
@@ -39,15 +39,15 @@ def test_redis_store_save_then_load():
     """save сериализует в Redis, load восстанавливает тот же стейт."""
     fake = FakeRedis()
     store = RedisStateStore(redis_client=fake, ttl=123)
-    state = DialogState(user_id="u2", funnel="tours")
-    state.qualification["destination"] = "Турция"
+    state = DialogState(user_id="u2", funnel="admission")
+    state.qualification["destination"] = "Программная инженерия"
 
     asyncio.run(store.save(state))
     loaded = asyncio.run(store.load("u2"))
 
-    assert loaded.qualification["destination"] == "Турция"
-    assert fake.data["frunze:dialog:u2"]  # лежит под ожидаемым ключом
-    assert fake.ttls["frunze:dialog:u2"] == 123  # TTL проставлен
+    assert loaded.qualification["destination"] == "Программная инженерия"
+    assert fake.data["college:dialog:u2"]  # лежит под ожидаемым ключом
+    assert fake.ttls["college:dialog:u2"] == 123  # TTL проставлен
 
 
 def test_redis_store_load_missing_returns_fresh():
@@ -64,3 +64,4 @@ def test_get_state_store_defaults_to_memory(monkeypatch):
 
     monkeypatch.setattr(state_mod.settings, "state_backend", "memory")
     assert isinstance(get_state_store(), StateStore)
+

@@ -35,7 +35,7 @@ class Deal(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
-    funnel: Mapped[str] = mapped_column(String(32))           # tours | visa | tickets
+    funnel: Mapped[str] = mapped_column(String(32))           # admission
     stage: Mapped[str] = mapped_column(String(64), default="new")
     contact: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)       # квалификация

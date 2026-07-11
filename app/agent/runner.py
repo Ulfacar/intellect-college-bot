@@ -1,44 +1,28 @@
-"""Агентный цикл: LLM ведёт диалог и вызывает инструменты воронки.
-
-Универсальный `run_turn(state, user_text, spec)` переиспользуется всеми воронками —
-без копирования цикла. Конкретика воронки (промпт, набор инструментов, исполнитель
-инструментов) живёт в `FunnelSpec`. История диалога — в `DialogState.history`
-(внутренний формат сообщений совместим с прежним агентным циклом).
-"""
+"""Generic LLM agent loop plus the admission funnel spec."""
 from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 
-import httpx
-
 from app.agent.llm import client
-from app.agent.prompts.tickets import SYSTEM as TICKETS_SYSTEM
-from app.agent.prompts.tours import SYSTEM as TOURS_SYSTEM, system_for_manager as tours_system_for_manager
-from app.agent.prompts.visa import SYSTEM as VISA_SYSTEM
+from app.agent.prompts.admission import SYSTEM as ADMISSION_SYSTEM, system_for_manager
 from app.agent.tools import tools_for
 from app.agent.validator import validate_reply
 from app.config import settings
 from app.core import observ
-from app.core.branding import GETVISA_EMAIL, GETVISA_OFFICE_ADDRESS, PRICE_DISCLAIMER
 from app.core.state import DialogState
-from app.core.visa_pricing import self_visa_reply, visa_price_reply
-from app.funnels.visa import score_visa, visa_category
+from app.funnels.admission import REQUIRED_FIELDS
 from app.integrations.crm import get_crm
-from app.integrations.tourvisor.client import TourVisorClient, TourVisorError
 
 logger = logging.getLogger("agent.runner")
 
 MAX_TOOL_ITERATIONS = 6
-_tourvisor = TourVisorClient()
-
 ToolExec = Callable[[str, dict, DialogState, object], Awaitable[str]]
 
 
 @dataclass
 class FunnelSpec:
-    """Описание воронки для агентного цикла."""
     name: str
     system: str
     tools: list[dict]
@@ -46,9 +30,8 @@ class FunnelSpec:
 
 
 async def run_turn(state: DialogState, user_text: str, spec: FunnelSpec) -> str | None:
-    """Обработать один ход клиента через LLM-агента (общий цикл для всех воронок)."""
     if state.intercepted:
-        return None  # менеджер перехватил диалог — бот молчит
+        return None
     state.history.append({"role": "user", "content": user_text})
     crm = get_crm()
 
@@ -72,7 +55,6 @@ async def run_turn(state: DialogState, user_text: str, spec: FunnelSpec) -> str 
             continue
 
         text = "".join(b.text for b in resp.content if b.type == "text")
-        # Валидатор: чиним безопасное (markdown, дисклеймер цен туров), мягко логируем риски.
         text, violations = validate_reply(text, spec.name)
         if violations:
             logger.info("validator (%s): %s", spec.name, ", ".join(violations))
@@ -81,176 +63,93 @@ async def run_turn(state: DialogState, user_text: str, spec: FunnelSpec) -> str 
         state.history.append({"role": "assistant", "content": text})
         return text or "Расскажите, пожалуйста, подробнее."
 
-    return "Давайте уточню детали ещё раз, чтобы подобрать лучший вариант."
+    return "Давайте уточню детали ещё раз, чтобы не ошибиться."
 
 
-# ---------------- Туры ----------------
-async def _tours_exec_tool(name: str, args: dict, state: DialogState, crm) -> str:
-    logger.info("tours tool %s args=%s", name, args)
+async def _admission_exec_tool(name: str, args: dict, state: DialogState, crm) -> str:
+    logger.info("admission tool %s args=%s", name, args)
 
-    if name == "search_tours":
-        state.qualification.update({k: v for k, v in args.items() if v})
-        if not state.deal_id:
-            state.deal_id = await crm.create_lead({"user_id": state.user_id}, "tours", state.qualification)
-        try:
-            tours = await _tourvisor.search(state.qualification)
-        except (TourVisorError, httpx.HTTPError):
-            return ("Поиск туров сейчас временно недоступен. Я записал ваш запрос — "
-                    "менеджер подберёт варианты и свяжется с вами.")
-        return "\n".join(tours) if tours else "Подходящих туров не нашлось."
-
-    if name == "handoff_to_manager":
-        if state.deal_id:
-            await crm.update_stage(state.deal_id, "manager_handoff")
-        state.stage = "manager"
-        return ("Передано менеджеру. Скажи клиенту КОРОТКО и честно: запрос передал(а) "
-                "менеджеру, он ответит в этом чате; НЕ утверждай, что менеджер уже онлайн.")
+    if name == "ask_qualification":
+        data = {k: v for k, v in args.items() if k in {"name", "grade_base", "direction"} and v}
+        had_data = bool(data)
+        state.qualification.update(data)
+        if had_data and not state.deal_id:
+            state.deal_id = await crm.create_lead({"user_id": state.user_id}, "admission", state.qualification)
+        state.stage = "qualification"
+        state.pending_field = args.get("field") or None
+        missing = [f for f in REQUIRED_FIELDS if f not in state.qualification]
+        if not missing:
+            state.pending_field = None
+            return (
+                "Все поля квалификации собраны (имя, база, направление). Больше анкетных "
+                "вопросов НЕ задавай. Ответь на текущий вопрос клиента, если он есть, и предложи "
+                "следующий шаг: запись на вступительный тест (escalate_to_office) или передачу менеджеру."
+            )
+        return (
+            f"Записал. Ещё не собрано: {missing}. Задай ОДИН вопрос про «{args.get('field')}» — "
+            "сначала коротко ответь на вопрос клиента, если он его задал. Не спрашивай два поля сразу."
+        )
 
     if name == "escalate_to_office":
         state.qualification.update({
             k: v for k, v in args.items()
-            if k in {"name", "visit_time", "office_visit", "selected_option"} and v
+            if k in {"name", "grade_base", "direction", "visit_time"} and v
         })
         client_name = args.get("name") or state.qualification.get("name")
-        visit_time = (
-            args.get("visit_time")
-            or state.qualification.get("visit_time")
-            or state.qualification.get("office_visit")
-        )
         if not client_name:
             return (
-                "Клиент хочет в офис, но имя ещё не собрано. НЕ вызывай офис как записанный "
-                "визит и НЕ говори «менеджер уже ждёт». Сначала ответь на текущий вопрос клиента "
-                "по туру, затем спроси: «Как могу к вам обращаться, чтобы менеджер понимал, "
-                "по какой заявке вы придёте?»"
+                "Клиент готов на тест, но имя не собрано. НЕ подтверждай запись. Сначала ответь "
+                "на текущий вопрос клиента, затем спроси, как к нему обращаться."
             )
-        if not visit_time:
-            return (
-                "Имя клиента уже есть, но время визита не подтверждено. НЕ говори «менеджер уже "
-                "ждёт». Спроси, на какое время завтра/в выбранный день клиенту удобно подойти."
-            )
-        if state.deal_id:
-            await crm.update_stage(state.deal_id, "office_consultation")
-        state.stage = "office"
+        if not state.deal_id:
+            state.deal_id = await crm.create_lead({"user_id": state.user_id}, "admission", state.qualification)
+        await crm.update_stage(state.deal_id, "test_invite")
+        state.stage = "test_invite"
         return (
-            "Визит можно подтверждать. Коротко зафиксируй имя, время и выбранный вариант; "
-            "дай адрес офиса, если клиент его ещё не получил. Паспорт упомяни мягко: для брони "
-            "лучше взять загранпаспорта. Не утверждай, что менеджер уже ждёт."
+            "Зафиксировано: клиент приглашён на вступительный тест. Скажи коротко: заявку на тест "
+            "передал менеджеру приёмной, он свяжется в этом чате и подтвердит дату, время и формат. "
+            "НЕ называй сам дату/время/формат теста и проходной балл — порядок записи подтверждает "
+            "менеджер. Напомни, что тест по математике и английскому, длительность 1,5 часа, и что "
+            "персональная скидка обсуждается после теста (размер не называй)."
         )
 
-    return "ok"
-
-
-TOURS_SPEC = FunnelSpec(
-    name="tours",
-    system=TOURS_SYSTEM,
-    tools=tools_for(["search_tours", "handoff_to_manager", "escalate_to_office"]),
-    exec_tool=_tours_exec_tool,
-)
-
-
-async def run_tours_turn(state: DialogState, user_text: str) -> str | None:
-    """Один ход клиента в воронке «Туры»."""
-    spec = TOURS_SPEC
-    if state.manager_name:
-        spec = replace(TOURS_SPEC, system=tours_system_for_manager(state.manager_name))
-    return await run_turn(state, user_text, spec)
-
-
-# ---------------- Визы ----------------
-async def _visa_exec_tool(name: str, args: dict, state: DialogState, crm) -> str:
-    logger.info("visa tool %s args=%s", name, args)
-
-    if name == "score_visa":
-        state.qualification.update({k: v for k, v in args.items() if v})
-        if not state.deal_id:
-            state.deal_id = await crm.create_lead({"user_id": state.user_id}, "visa", state.qualification)
-        await crm.update_stage(state.deal_id, "visa_scoring")
-        category = visa_category(score_visa(state.qualification))
-        # Категория — ВНУТРЕННИЙ ориентир для тона. Клиенту НЕ обещаем визу/процент,
-        # всегда ведём на консультацию (escalate_to_office).
-        return (f"[внутренний сигнал силы кейса: {category}] Не называй клиенту процент и не "
-                f"обещай визу. Подай мягко и честно (грамотная анкета и подготовка к интервью "
-                f"решают многое) и пригласи на консультацию в офис или онлайн. Цену услуги "
-                f"называй по официальному прайсу только если клиент спросил; депозиты/итоговую "
-                f"сумму — не называй.")
-
     if name == "handoff_to_manager":
+        reason = args.get("reason")
+        if reason:
+            state.qualification["escalation_reason"] = reason
+        if not state.deal_id and state.qualification:
+            state.deal_id = await crm.create_lead({"user_id": state.user_id}, "admission", state.qualification)
         if state.deal_id:
             await crm.update_stage(state.deal_id, "manager_handoff")
         state.stage = "manager"
-        return ("Передано менеджеру. Скажи клиенту КОРОТКО и честно: запрос передал(а) "
-                "менеджеру, он ответит в этом чате; НЕ утверждай, что менеджер уже онлайн.")
+        return (
+            "Передано менеджеру приёмной комиссии. Скажи клиенту КОРОТКО и честно: вопрос "
+            "передал менеджеру, он ответит в этом чате; НЕ утверждай, что менеджер уже онлайн, "
+            "и НЕ отвечай сам на вопрос, из-за которого эскалируешь."
+        )
 
-    if name == "escalate_to_office":
+    if name == "crm_update_stage":
+        stage = args.get("stage")
+        if stage not in {"qualification", "consulting", "test_invite"}:
+            return "Недопустимая стадия, ничего не менял."
+        state.stage = stage
         if state.deal_id:
-            await crm.update_stage(state.deal_id, "office_consultation")
-        state.stage = "office"
-        return (f"Пригласи клиента на консультацию. Адрес офиса: {GETVISA_OFFICE_ADDRESS}. "
-                f"Можно начать и онлайн. Почта для документов: {GETVISA_EMAIL}. Цену услуги "
-                f"называй по официальному прайсу только если клиент спросил; депозиты/итоговую "
-                f"сумму — не называй.")
+            await crm.update_stage(state.deal_id, stage)
+        return f"Стадия обновлена: {stage}. Продолжай диалог."
 
     return "ok"
 
 
-VISA_SPEC = FunnelSpec(
-    name="visa",
-    system=VISA_SYSTEM,
-    tools=tools_for(["score_visa", "escalate_to_office", "handoff_to_manager"]),
-    exec_tool=_visa_exec_tool,
+ADMISSION_SPEC = FunnelSpec(
+    name="admission",
+    system=ADMISSION_SYSTEM,
+    tools=tools_for(["ask_qualification", "handoff_to_manager", "escalate_to_office", "crm_update_stage"]),
+    exec_tool=_admission_exec_tool,
 )
 
 
-async def run_visa_turn(state: DialogState, user_text: str) -> str | None:
-    """Один ход клиента в воронке «Визы»."""
-    price_reply = visa_price_reply(user_text)
-    if price_reply:
-        state.history.append({"role": "user", "content": user_text})
-        state.history.append({"role": "assistant", "content": price_reply})
-        return price_reply
-
-    retention = self_visa_reply(
-        user_text,
-        already_sent=bool(state.qualification.get("self_visa_retention_sent")),
-    )
-    if retention:
-        state.history.append({"role": "user", "content": user_text})
-        state.history.append({"role": "assistant", "content": retention})
-        if state.qualification.get("self_visa_retention_sent"):
-            state.stage = "manager"
-            state.intercepted = True
-        else:
-            state.qualification["self_visa_retention_sent"] = True
-        return retention
-
-    return await run_turn(state, user_text, VISA_SPEC)
-
-
-# ---------------- Билеты ----------------
-async def _tickets_exec_tool(name: str, args: dict, state: DialogState, crm) -> str:
-    logger.info("tickets tool %s args=%s", name, args)
-
-    if name == "submit_request":
-        state.qualification.update({k: v for k, v in args.items() if v})
-        if not state.deal_id:
-            state.deal_id = await crm.create_lead({"user_id": state.user_id}, "tickets", state.qualification)
-        await crm.update_stage(state.deal_id, "manager_handoff")
-        state.stage = "manager"
-        return (f"Заявка передана менеджеру на подбор рейса и оплату. Скажи клиенту, что "
-                f"менеджер пришлёт варианты и цену. {PRICE_DISCLAIMER} Цену сам не называй.")
-
-    return "ok"
-
-
-TICKETS_SPEC = FunnelSpec(
-    name="tickets",
-    system=TICKETS_SYSTEM,
-    tools=tools_for(["submit_request"]),
-    exec_tool=_tickets_exec_tool,
-)
-
-
-async def run_tickets_turn(state: DialogState, user_text: str) -> str | None:
-    """Один ход клиента в воронке «Билеты»."""
-    return await run_turn(state, user_text, TICKETS_SPEC)
+async def run_admission_turn(state: DialogState, user_text: str) -> str | None:
+    spec = ADMISSION_SPEC
+    if state.manager_name:
+        spec = replace(ADMISSION_SPEC, system=system_for_manager(state.manager_name))
+    return await run_turn(state, user_text, spec)

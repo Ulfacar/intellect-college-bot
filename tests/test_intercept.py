@@ -1,4 +1,4 @@
-"""Нативный перехват: когда менеджер взял диалог (state.intercepted=True), бот молчит."""
+﻿"""Нативный перехват: когда менеджер взял диалог (state.intercepted=True), бот молчит."""
 import asyncio
 from unittest.mock import AsyncMock
 
@@ -7,14 +7,14 @@ from app.core.state import DialogState
 
 
 def test_runner_silent_when_intercepted(monkeypatch):
-    """run_tours_turn не зовёт Claude и ничего не отвечает при перехвате."""
-    state = DialogState(user_id="u1", funnel="tours")
+    """run_admission_turn не зовёт Claude и ничего не отвечает при перехвате."""
+    state = DialogState(user_id="u1", funnel="admission")
     state.intercepted = True
     fake = AsyncMock()
     fake.messages.create = AsyncMock()
     monkeypatch.setattr(runner, "client", lambda: fake)
 
-    reply = asyncio.run(runner.run_tours_turn(state, "привет"))
+    reply = asyncio.run(runner.run_admission_turn(state, "привет"))
 
     assert reply is None
     fake.messages.create.assert_not_called()
@@ -39,10 +39,10 @@ def test_orchestrator_silent_when_intercepted(monkeypatch):
             sent.append((chat_id, text))
 
     state = asyncio.run(state_store.load("intercepted-user"))
-    state.funnel = "tours"
+    state.funnel = "admission"
     state.intercepted = True
 
-    msg = Message(channel="telegram", user_id="intercepted-user", chat_id="42", text="есть туры?")
+    msg = Message(channel="telegram", user_id="intercepted-user", chat_id="42", text="есть поступление?")
     asyncio.run(Orchestrator(channel=FakeChannel()).handle(msg))
 
     assert sent == []  # бот промолчал
@@ -76,7 +76,7 @@ def test_handoff_to_manager_auto_intercepts(monkeypatch):
     monkeypatch.setattr(orch, "get_funnel", lambda name: HandoffFunnel())
 
     state = asyncio.run(state_store.load("handoff-user"))
-    state.funnel = "visa"
+    state.funnel = "admission"
     state.intercepted = False
 
     orchestrator = Orchestrator(channel=FakeChannel())
@@ -94,7 +94,7 @@ def test_handoff_to_manager_auto_intercepts(monkeypatch):
     sent.clear()
     msg2 = Message(channel="telegram", user_id="handoff-user", chat_id="77", text="ещё вопрос")
     asyncio.run(orchestrator.handle(msg2))
-    assert sent == [("77", wait_ack_for("visa"))]
+    assert sent == [("77", wait_ack_for("admission"))]
 
     # А вот уже следующее — молчит (ack разовый, дальше напомнит awaiting-джоба менеджеру).
     sent.clear()
@@ -126,7 +126,7 @@ def test_handoff_no_ack_when_manager_engaged(monkeypatch):
     monkeypatch.setattr(orch, "get_funnel", lambda name: None)  # не должен вызываться
 
     state = asyncio.run(state_store.load("claimed-user"))
-    state.funnel = "tours"
+    state.funnel = "admission"
     state.stage = "manager"
     state.intercepted = True
 
@@ -171,7 +171,7 @@ def test_concurrent_messages_same_dialog_serialized(monkeypatch):
             sent.append(text)
 
     state = asyncio.run(state_store.load("race-user"))
-    state.funnel = "tours"
+    state.funnel = "admission"
     state.intercepted = False
 
     orchestrator = Orchestrator(channel=FakeChannel())
@@ -218,10 +218,11 @@ def test_reply_dropped_when_intercepted_mid_flight(monkeypatch):
     monkeypatch.setattr(orch, "get_funnel", lambda name: MidFlightInterceptFunnel())
 
     state = asyncio.run(state_store.load("midflight-user"))
-    state.funnel = "visa"
+    state.funnel = "admission"
     state.intercepted = False
 
     msg = Message(channel="telegram", user_id="midflight-user", chat_id="55", text="вопрос")
     asyncio.run(Orchestrator(channel=FakeChannel()).handle(msg))
 
     assert sent == []  # ответ дропнут — отвечает менеджер
+

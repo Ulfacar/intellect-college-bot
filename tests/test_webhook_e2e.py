@@ -1,4 +1,4 @@
-"""End-to-end тест вебхука Bitrix: form-событие → роутинг по BOT_ID → parse →
+﻿"""End-to-end тест вебхука Bitrix: form-событие → роутинг по BOT_ID → parse →
 оркестратор → ответ в канал. Воронку подменяем FakeFunnel (детерминизм, без LLM).
 """
 from fastapi.testclient import TestClient
@@ -23,14 +23,14 @@ class _RecordingChannel(BitrixOpenLinesAdapter):
 
 
 def _wire_single_bot(monkeypatch) -> _RecordingChannel:
-    """Подменить реестр и оркестраторы одним тестовым тур-ботом (BOT_ID=999)."""
+    """Подменить реестр и оркестраторы одним тестовым поступление-ботом (BOT_ID=999)."""
     class FakeFunnel:
         async def handle(self, msg, state):
             return f"echo:{msg.text}"
 
     monkeypatch.setattr(orch, "get_funnel", lambda name: FakeFunnel())
 
-    bot = BotConfig(id="t1", scenario="tours", bitrix_bot_id="999")
+    bot = BotConfig(id="t1", scenario="admission", bitrix_bot_id="999")
     channel = _RecordingChannel(bot)
     monkeypatch.setattr(main, "registry", BotRegistry([bot]))
     monkeypatch.setattr(main, "_bot_orchestrators", {bot.id: Orchestrator(channel=channel, bot=bot)})
@@ -83,3 +83,4 @@ def test_webhook_accepts_json_body(monkeypatch):
 
     assert resp.json() == {"ok": True, "bot": "t1"}
     assert channel.sent == [("chat3", "echo:по json")]
+

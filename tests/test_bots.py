@@ -1,5 +1,4 @@
-"""Фаза 1: реестр ботов, маршрутизация по BOT_ID, bot-aware выбор воронки."""
-import asyncio
+﻿import asyncio
 
 from app.channels.base import Message
 from app.channels.bitrix_openlines import bot_id_from_event
@@ -11,42 +10,34 @@ from app.core.state import state_store
 
 def _registry() -> BotRegistry:
     return BotRegistry([
-        BotConfig(id="frunze_tours_1", scenario="tours", title="FrunzeTravel",
-                  bitrix_bot_id="101", bitrix_line_id="1", category_id="2"),
-        BotConfig(id="frunze_tours_2", scenario="tours", title="FrunzeTravel2",
-                  bitrix_bot_id="102", bitrix_line_id="2", category_id="2"),
-        BotConfig(id="getvisa", scenario="visa", title="GetVisa",
-                  bitrix_bot_id="103", bitrix_line_id="3", category_id="4"),
+        BotConfig(id="college_1", scenario="admission", title="Intellect 1", bitrix_bot_id="101", bitrix_line_id="1"),
+        BotConfig(id="college_2", scenario="admission", title="Intellect 2", bitrix_bot_id="102", bitrix_line_id="2"),
+        BotConfig(id="college_3", scenario="admission", title="Intellect 3", bitrix_bot_id="103", bitrix_line_id="3"),
     ])
 
 
 def test_registry_lookup_by_id_and_bot_id():
     reg = _registry()
-    assert reg.by_id("getvisa").scenario == "visa"
-    assert reg.by_bitrix_bot_id("101").id == "frunze_tours_1"
-    assert reg.by_bitrix_bot_id(102).id == "frunze_tours_2"  # int → str
-    assert reg.by_line("3").id == "getvisa"
+    assert reg.by_id("college_1").scenario == "admission"
+    assert reg.by_bitrix_bot_id("101").id == "college_1"
+    assert reg.by_bitrix_bot_id(102).id == "college_2"
+    assert reg.by_line("3").id == "college_3"
     assert reg.by_bitrix_bot_id("999") is None
     assert len(reg.all()) == 3
 
 
-def test_default_bots_match_starting_wappi_profiles():
+def test_default_bots_are_college_placeholders():
     from app.config import DEFAULT_BOTS
 
     reg = BotRegistry(DEFAULT_BOTS)
-
-    assert [bot.id for bot in reg.all()] == ["frunze_tours", "frunze_tours_sezim", "getvisa"]
-    assert reg.by_wappi_profile_id("00000000-0000").id == "frunze_tours"
-    assert reg.by_wappi_profile_id("6a74fb33-16aa").id == "frunze_tours_sezim"
-    assert reg.by_wappi_profile_id("00000000-0000").id == "getvisa"
-    assert reg.by_id("frunze_tours").manager_name == "Адеми"
-    assert reg.by_id("frunze_tours_sezim").manager_name == "Сезим"
+    assert [bot.id for bot in reg.all()] == ["college_1", "college_2", "college_3"]
+    assert all(bot.scenario == "admission" for bot in reg.all())
+    assert all(not bot.wappi_profile_id for bot in reg.all())
 
 
 def test_registry_ignores_unconfigured_bots():
-    """Боты без BOT_ID (до Фазы 0) не участвуют в маршрутизации, но видимы по id."""
-    reg = BotRegistry([BotConfig(id="getvisa", scenario="visa")])
-    assert reg.by_id("getvisa") is not None
+    reg = BotRegistry([BotConfig(id="college_1", scenario="admission")])
+    assert reg.by_id("college_1") is not None
     assert reg.by_bitrix_bot_id("") is None
 
 
@@ -57,8 +48,7 @@ def test_bot_id_from_event_simple_and_bitrix_shapes():
     assert bot_id_from_event({"data": {}}) is None
 
 
-def test_tours_bot_forces_funnel_without_keywords(monkeypatch):
-    """Тур-бот ставит воронку tours по сценарию, даже если в тексте нет тур-слов."""
+def test_college_bot_forces_admission_funnel(monkeypatch):
     import app.core.orchestrator as orch
 
     seen = {}
@@ -76,39 +66,11 @@ def test_tours_bot_forces_funnel_without_keywords(monkeypatch):
         async def send(self, chat_id, text, **kwargs):
             ...
 
-    bot = BotConfig(id="frunze_tours_1", scenario="tours")
-    state = asyncio.run(state_store.load("bot-user-tours"))
+    bot = BotConfig(id="college_1", scenario="admission")
+    state = asyncio.run(state_store.load("bot-user-admission"))
     state.funnel = None
-    msg = Message(channel="bitrix_openlines", user_id="bot-user-tours", chat_id="9",
-                  text="здравствуйте")  # без ключевых слов про тур
+    msg = Message(channel="bitrix_openlines", user_id="bot-user-admission", chat_id="9", text="здравствуйте")
     asyncio.run(Orchestrator(channel=FakeChannel(), bot=bot).handle(msg))
 
-    assert seen["funnel"] == "tours"
+    assert seen["funnel"] == "admission"
 
-
-def test_visa_bot_forces_visa_funnel(monkeypatch):
-    import app.core.orchestrator as orch
-
-    seen = {}
-
-    class FakeFunnel:
-        async def handle(self, msg, state):
-            seen["funnel"] = state.funnel
-            return None
-
-    monkeypatch.setattr(orch, "get_funnel", lambda name: FakeFunnel())
-
-    class FakeChannel:
-        channel = "bitrix_openlines"
-
-        async def send(self, chat_id, text, **kwargs):
-            ...
-
-    bot = BotConfig(id="getvisa", scenario="visa")
-    state = asyncio.run(state_store.load("bot-user-visa"))
-    state.funnel = None
-    msg = Message(channel="bitrix_openlines", user_id="bot-user-visa", chat_id="9",
-                  text="добрый день")
-    asyncio.run(Orchestrator(channel=FakeChannel(), bot=bot).handle(msg))
-
-    assert seen["funnel"] == "visa"

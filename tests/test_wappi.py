@@ -1,4 +1,4 @@
-"""Тесты прямого WhatsApp-канала Wappi: parse/send, фильтр эхо, e2e webhook."""
+﻿"""Тесты прямого WhatsApp-канала Wappi: parse/send, фильтр эхо, e2e webhook."""
 import asyncio
 import json
 
@@ -46,11 +46,11 @@ def test_is_incoming_filters_echo_and_status():
 
 # ---------------- parse ----------------
 def test_parse_text_message():
-    msg = asyncio.run(WappiAdapter().parse(_incoming("хочу тур в Турцию")))
+    msg = asyncio.run(WappiAdapter().parse(_incoming("хочу поступление в поступлениецию")))
     assert msg.channel == "whatsapp"
     assert msg.user_id == "996700123456"             # номер без @c.us
     assert msg.chat_id == "996700123456@c.us"        # отвечаем в этот chatId
-    assert msg.text == "хочу тур в Турцию"
+    assert msg.text == "хочу поступление в поступлениецию"
     assert msg.kind == "text"
 
 
@@ -73,7 +73,7 @@ def test_send_calls_wappi_api(monkeypatch):
         return httpx.Response(200, json={"status": "done"})
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    bot = BotConfig(id="frunze_tours_1", scenario="tours", wappi_profile_id=PROFILE)
+    bot = BotConfig(id="college_1", scenario="admission", wappi_profile_id=PROFILE)
     adapter = WappiAdapter(bot=bot, client=client)
 
     asyncio.run(adapter.send("996700123456@c.us", "Здравствуйте!"))
@@ -93,7 +93,7 @@ def test_send_skipped_without_credentials(monkeypatch):
     calls = []
     client = httpx.AsyncClient(transport=httpx.MockTransport(
         lambda r: calls.append(r) or httpx.Response(200)))
-    adapter = WappiAdapter(bot=BotConfig(id="x", scenario="tours"), client=client)
+    adapter = WappiAdapter(bot=BotConfig(id="x", scenario="admission"), client=client)
     asyncio.run(adapter.send("996700123456@c.us", "текст"))
     assert calls == []
 
@@ -106,7 +106,7 @@ def _wire_wappi_bot(monkeypatch):
 
     monkeypatch.setattr(orch, "get_funnel", lambda name: FakeFunnel())
 
-    bot = BotConfig(id="frunze_tours_1", scenario="tours", wappi_profile_id=PROFILE)
+    bot = BotConfig(id="college_1", scenario="admission", wappi_profile_id=PROFILE)
 
     class RecordingWappi(WappiAdapter):
         def __init__(self, bot):
@@ -126,11 +126,11 @@ def test_wappi_webhook_routes_and_replies(monkeypatch):
     channel = _wire_wappi_bot(monkeypatch)
     client = TestClient(main.app)
 
-    resp = client.post("/webhook/wappi", json=_wrapped(_incoming("хочу тур")))
+    resp = client.post("/webhook/wappi", json=_wrapped(_incoming("хочу поступление")))
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "handled": 1}
-    assert channel.sent == [("996700123456@c.us", "echo:хочу тур")]
+    assert channel.sent == [("996700123456@c.us", "echo:хочу поступление")]
 
 
 def test_wappi_webhook_ignores_own_echo(monkeypatch):
@@ -171,3 +171,4 @@ def test_delivery_status_helpers():
     assert is_delivery_status({"wh_type": "incoming_message"}) is False
     # неизвестный статус → пустая строка (не трогаем сообщение)
     assert parse_delivery_status({"wh_type": "ack", "id": "x", "status": "weird"}) == ("x", "")
+

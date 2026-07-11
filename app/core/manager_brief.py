@@ -1,61 +1,33 @@
-"""Manager-facing brief for the admin chat card.
-
-The bot's primary job is to qualify and warm up a lead before a manager or the
-office takes over. This module turns current dialog state into a compact,
-operator-readable summary without relying on the LLM response format.
-"""
+"""Manager-facing brief for the admissions admin card."""
 from __future__ import annotations
 
 from app.core.state import DialogState
 
-
 FIELD_LABELS = {
     "name": "имя",
-    "country": "страна",
-    "age": "возраст",
-    "marital_status": "семейное положение",
-    "occupation": "работа/учеба",
-    "prior_countries": "визовая/туристическая история",
-    "companions": "кто едет",
-    "english_level": "английский",
-    "dates": "даты",
-    "prior_refusal": "отказы",
-    "destination": "направление",
-    "tourists": "туристы",
-    "budget": "бюджет",
-    "departure_city": "город вылета",
-    "hotel_stars": "звезды отеля",
-    "meal": "питание",
-    "visit_time": "время визита",
-    "office_visit": "визит в офис",
-    "selected_option": "выбранный вариант",
-    "route": "маршрут",
-    "passengers": "пассажиры",
-    "baggage": "багаж",
+    "grade_base": "база",
+    "direction": "направление",
+    "visit_time": "удобное время",
+    "escalation_reason": "причина эскалации",
 }
 
 
 def build_manager_brief(state: DialogState) -> dict[str, str]:
-    """Return compact fields shown in the admin panel."""
     hot_signal = _latest_user_text_has_hot_signal(state)
     if not state.funnel:
         return {
-            "ai_summary": "Клиент написал, направление еще не определено.",
-            "manager_next_step": "Дождаться ответа клиента или уточнить: тур, виза или билеты.",
-            "escalation_reason": "Клиент уже проявил готовность к действию." if hot_signal else "",
+            "ai_summary": "Клиент написал, сценарий приёмной ещё не зафиксирован.",
+            "manager_next_step": "Уточнить базу поступления: после 9 или 11 класса.",
+            "escalation_reason": "Клиент готов к следующему шагу." if hot_signal else "",
             "lead_temperature": "hot" if hot_signal else "new",
         }
 
     known = _known_fields(state.qualification)
-    summary = _summary(state.funnel, known)
-    next_step = _next_step(state, hot_signal)
-    reason = _escalation_reason(state, hot_signal)
-    temperature = _temperature(state, hot_signal)
     return {
-        "ai_summary": summary,
-        "manager_next_step": next_step,
-        "escalation_reason": reason,
-        "lead_temperature": temperature,
+        "ai_summary": _summary(known),
+        "manager_next_step": _next_step(state, hot_signal),
+        "escalation_reason": _escalation_reason(state, hot_signal),
+        "lead_temperature": _temperature(state, hot_signal),
     }
 
 
@@ -69,74 +41,56 @@ def _known_fields(data: dict) -> list[str]:
     return parts
 
 
-def _summary(funnel: str, known: list[str]) -> str:
-    prefix = {
-        "visa": "Визовый лид",
-        "tours": "Лид на тур",
-        "tickets": "Лид на билеты",
-    }.get(funnel, "Лид")
+def _summary(known: list[str]) -> str:
     if not known:
-        return f"{prefix}: бот начал квалификацию, данных пока мало."
-    return f"{prefix}. Уже собрано: " + "; ".join(known[:8]) + "."
+        return "Абитуриент: бот начал квалификацию, данных пока мало."
+    return "Абитуриент. Уже собрано: " + "; ".join(known[:8]) + "."
 
 
 def _next_step(state: DialogState, hot_signal: bool = False) -> str:
     if hot_signal:
-        return "Горячий клиент: подключиться вручную и зафиксировать офис/созвон/бронь."
+        return "Горячий клиент: подключиться и подтвердить следующий шаг по тесту."
     if state.intercepted:
-        return "Диалог у менеджера: ответить клиенту вручную и довести до офиса/оплаты."
+        return "Диалог у менеджера: ответить клиенту вручную."
     if state.stage in {"follow_up", "followup", "callback"}:
-        return "Сделать короткое повторное касание и вернуть клиента к следующему шагу."
-    if state.stage in {"office", "office_consultation"}:
-        return "Согласовать удобное время консультации в офисе или онлайн."
+        return "Сделать короткое повторное касание и вернуть к поступлению."
+    if state.stage in {"test_invite", "office", "office_consultation"}:
+        return "Подтвердить дату, время и формат вступительного теста."
     if state.stage in {"manager", "manager_handoff"}:
-        return "Подключиться и дожать: бронь, оплата, запись или точный следующий шаг."
-    if state.stage in {"search", "scoring", "visa_scoring"}:
-        return "Проверить собранные данные и подготовить предложение/консультацию."
-    return "Продолжить квалификацию: бот собирает недостающие ответы."
+        return "Ответить на вопрос, который бот передал менеджеру."
+    return "Продолжить квалификацию: база, имя, направление."
 
 
 def _escalation_reason(state: DialogState, hot_signal: bool = False) -> str:
-    data = {k: str(v).lower() for k, v in state.qualification.items() if v is not None}
+    explicit = state.qualification.get("escalation_reason")
+    if explicit:
+        return str(explicit)
     if hot_signal:
-        return "Клиент сам показал готовность к оплате, брони, офису или созвону."
-    if state.stage in {"follow_up", "followup", "callback"}:
-        return "Нужно вернуть клиента после паузы: такие лиды часто дозревают через повторное касание."
-    if state.stage in {"office", "office_consultation"}:
-        return "Бот ведет клиента к консультации в офисе/онлайн."
+        return "Клиент сам показал готовность к тесту или оформлению."
+    if state.stage in {"test_invite", "office", "office_consultation"}:
+        return "Клиент приглашён на вступительный тест."
     if state.stage in {"manager", "manager_handoff"}:
-        return "Нужен живой менеджер для дожима или ручного подбора."
-    if "prior_refusal" in data and data["prior_refusal"] not in {"нет", "не было", "no", ""}:
-        return "В визовом кейсе указан отказ - нужен внимательный разбор."
-    budget = data.get("budget", "")
-    if any(marker in budget for marker in ("деш", "миним", "недорог", "самый")):
-        return "Клиент чувствителен к бюджету - важно аккуратно сверить ожидания."
+        return "Нужен живой менеджер приёмной комиссии."
     return ""
 
 
 def _temperature(state: DialogState, hot_signal: bool = False) -> str:
     if hot_signal:
         return "hot"
-    if state.intercepted or state.stage in {"manager", "manager_handoff"}:
+    if state.intercepted or state.stage in {"manager", "manager_handoff", "test_invite"}:
         return "hot"
-    if state.stage in {"office", "office_consultation"}:
-        return "warm"
     if state.stage in {"follow_up", "followup", "callback"}:
         return "warm"
-    if len([v for v in state.qualification.values() if v]) >= 4:
+    if len([v for v in state.qualification.values() if v]) >= 2:
         return "warm"
     return "new"
 
 
 def _latest_user_text_has_hot_signal(state: DialogState) -> bool:
     text = _latest_user_text(state).lower()
-    if not text:
-        return False
     markers = (
-        "готов оплат", "оплат", "деньги", "перевед", "перевод",
-        "брон", "заброн", "покуп", "берем", "берём",
-        "подойти в офис", "приду", "можно подойти", "запишите", "запис",
-        "созвон", "позвон", "стоимость не имеет значения", "главное визу",
+        "запишите", "запис", "тест", "хочу поступ", "поступать", "готов",
+        "приду", "подойти", "оформ", "оплат", "тестке", "тапшыр",
     )
     return any(marker in text for marker in markers)
 

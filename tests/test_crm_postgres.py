@@ -1,4 +1,4 @@
-"""Тесты PostgresCrm на in-memory SQLite (без сетевого Postgres).
+﻿"""Тесты PostgresCrm на in-memory SQLite (без сетевого Postgres).
 
 Проверяем контракт CRMPort: создание сделки, движение по стадии, заметки —
 всё с реальной БД (async SQLAlchemy), но в памяти и переживая «сессии».
@@ -34,13 +34,13 @@ def run_with_db(scenario):
 def test_create_lead_persists_and_returns_id():
     async def scenario(sm):
         crm = PostgresCrm(sessionmaker=sm)
-        deal_id = await crm.create_lead({"user_id": "u1"}, "tours", {"destination": "Турция"})
+        deal_id = await crm.create_lead({"user_id": "u1"}, "admission", {"destination": "Программная инженерия"})
         assert deal_id.isdigit()
         async with sm() as session:
             deal = await session.get(Deal, int(deal_id))
-            assert deal.funnel == "tours"
+            assert deal.funnel == "admission"
             assert deal.stage == "new"
-            assert deal.data["destination"] == "Турция"
+            assert deal.data["destination"] == "Программная инженерия"
             assert deal.user_id == "u1"
 
     run_with_db(scenario)
@@ -49,7 +49,7 @@ def test_create_lead_persists_and_returns_id():
 def test_update_stage_and_add_note_persist():
     async def scenario(sm):
         crm = PostgresCrm(sessionmaker=sm)
-        deal_id = await crm.create_lead({"user_id": "v1"}, "visa", {"country": "Германия"})
+        deal_id = await crm.create_lead({"user_id": "v1"}, "admission", {"country": "9"})
         await crm.update_stage(deal_id, "office_consultation")
         await crm.add_note(deal_id, "клиент тёплый")
         await crm.add_note(deal_id, "перезвонить завтра")
@@ -70,3 +70,4 @@ def test_update_unknown_deal_is_safe():
         await crm.add_note("999", "ничего")
 
     run_with_db(scenario)
+

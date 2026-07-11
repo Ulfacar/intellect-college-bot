@@ -1,4 +1,4 @@
-"""Тесты go-live hardening: проверка вебхуков, rate-limit логина, graceful-фолбэк LLM."""
+﻿"""Тесты go-live hardening: проверка вебхуков, rate-limit логина, graceful-фолбэк LLM."""
 import asyncio
 
 from fastapi.testclient import TestClient
@@ -76,7 +76,7 @@ def test_llm_failure_sends_soft_fallback(monkeypatch):
     from app.core import observ
     observ.reset()
     ch = _FakeChannel()
-    orch = Orchestrator(channel=ch, bot=BotConfig(id="getvisa", scenario="visa"))
+    orch = Orchestrator(channel=ch, bot=BotConfig(id="college_2", scenario="admission"))
 
     import app.core.orchestrator as orch_mod
 
@@ -90,3 +90,4 @@ def test_llm_failure_sends_soft_fallback(monkeypatch):
 
     assert ch.sent and ch.sent[-1][1] == LLM_ERROR_FALLBACK
     assert observ.snapshot()["llm_failures"] >= 1
+

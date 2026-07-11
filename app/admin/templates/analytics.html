@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Frunze — аналитика</title>
+  <title>Intellect College — аналитика</title>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root { --bg:#F1F5F9; --surface:#FFFFFF; --elev:#F1F5F9; --border:#E2E8F0; --text:#0F172A;
@@ -69,9 +69,9 @@
     <div class="cards">
       <div class="kpi good"><div class="n">{{ a.containment_rate }}%</div><div class="l">Containment (бот без менеджера)</div></div>
       <div class="kpi"><div class="n">{{ a.contained }}/{{ a.total }}</div><div class="l">Диалогов вёл только бот</div></div>
-      <div class="kpi good"><div class="n">{{ a.outcomes.get('won', 0) }}</div><div class="l">✅ Оплатили</div></div>
-      <div class="kpi"><div class="n">{{ a.outcomes.get('office', 0) }}</div><div class="l">🏢 Дошли в офис</div></div>
-      <div class="kpi warm"><div class="n">{{ a.outcomes.get('lost', 0) }}</div><div class="l">❌ Слились</div></div>
+      <div class="kpi good"><div class="n">{{ a.outcomes.get('won', 0) }}</div><div class="l">🎓 Поступают</div></div>
+      <div class="kpi"><div class="n">{{ a.outcomes.get('office', 0) }}</div><div class="l">📝 Дошли до теста</div></div>
+      <div class="kpi warm"><div class="n">{{ a.outcomes.get('lost', 0) }}</div><div class="l">❌ Слив</div></div>
       <div class="kpi"><div class="n">{{ a.avg_response_min if a.avg_response_min is not none else '—' }}{% if a.avg_response_min is not none %} мин{% endif %}</div><div class="l">Среднее время ответа менеджера</div></div>
       <div class="kpi"><div class="n">{{ a.avg_handoff_min if a.avg_handoff_min is not none else '—' }}{% if a.avg_handoff_min is not none %} мин{% endif %}</div><div class="l">Среднее время до подключения менеджера</div></div>
     </div>
@@ -93,7 +93,7 @@
     <div class="panel">
       <h2>Исходы</h2>
       {% set colors = {'won':'#059669','office':'#2563EB','manager':'#D97706','lost':'#DC2626','in_progress':'#94A3B8'} %}
-      {% for key, label in [('won','✅ Оплатил'),('office','🏢 Дошёл в офис'),('manager','👤 У менеджера'),('lost','❌ Слился'),('in_progress','⏳ В работе')] %}
+      {% for key, label in [('won','🎓 Поступает'),('office','📝 Дошёл до теста'),('manager','👤 У менеджера'),('lost','❌ Слив'),('in_progress','⏳ В работе')] %}
       {% set n = a.outcomes.get(key, 0) %}
       <div class="obar">
         <span>{{ label }}</span>
@@ -107,7 +107,7 @@
       <h2>По менеджерам</h2>
       {% if a.by_manager %}
       <table>
-        <tr><th>Менеджер</th><th>Вёл диалогов</th><th>✅ Оплат</th><th>🏢 Офис</th><th>❌ Слив</th></tr>
+        <tr><th>Менеджер</th><th>Вёл диалогов</th><th>🎓 Поступают</th><th>📝 Тест</th><th>❌ Слив</th></tr>
         {% for mgr, st in a.by_manager.items() %}
         <tr><td><b>{{ mgr }}</b></td><td>{{ st.get('handled', 0) }}</td>
             <td>{{ st.get('won', 0) }}</td><td>{{ st.get('office', 0) }}</td><td>{{ st.get('lost', 0) }}</td></tr>

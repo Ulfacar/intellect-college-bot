@@ -85,7 +85,7 @@ class BitrixOpenLinesAdapter:
 
     def __init__(self, bot: BotConfig | None = None, client: httpx.AsyncClient | None = None) -> None:
         self.bot = bot
-        self._base = settings.bitrix24_webhook_url.rstrip("/")
+        self._base = getattr(settings, "bitrix24_webhook_url", "").rstrip("/")
         self._client = client
 
     async def parse(self, raw: dict) -> Message:

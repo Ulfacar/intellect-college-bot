@@ -1,49 +1,45 @@
-"""Валидатор исходящих реплик бота — «ремень безопасности» поверх промптов.
+"""Outgoing reply validator for the college bot.
 
-Проверяет сгенерированный LLM ответ ДО отправки клиенту:
-- АВТО-ЧИНИТ безопасное: убирает markdown (мессенджер, не лендинг); для туров дописывает
-  дисклеймер про изменчивость цен, если в ответе есть сумма, а оговорки нет.
-- МЯГКО ЛОГИРУЕТ рискованное (гарантии визы, цены в билетах, длина, много вопросов) — БЕЗ
-  правки текста, чтобы случайно не испортить корректный ответ (напр. «визу НЕ гарантируем»
-  или эхо бюджета клиента «поняла, 500$»). Профилактика этого — в самих промптах.
-  NB: цены в ВИЗОВОЙ воронке больше не «нарушение» — заказчик разрешил называть официальный
-  прайс услуг (см. VISA_SERVICE_PRICES); ремень безопасности здесь — только детектор гарантий.
-
-Чистые функции (тестируемо). Подключается в `app/agent/runner.run_turn`; сводка сработок —
-через `observ.note_validation` (видна на /admin/system).
+Only formatting is auto-fixed. Risky facts are logged by returning violation codes.
 """
 from __future__ import annotations
 
 import re
 
-from app.core.branding import PRICE_DISCLAIMER
+MAX_LEN = 600
 
-MAX_LEN = 600  # мягкий лимит длины реплики (символов) — только для лога, текст не режем
-
-# --- markdown-разметка, неуместная в мессенджере ---
-_BOLD = re.compile(r"\*{1,3}(.+?)\*{1,3}", re.DOTALL)       # **жирный** / *курсив*
+_BOLD = re.compile(r"\*{1,3}(.+?)\*{1,3}", re.DOTALL)
 _UNDERSCORE = re.compile(r"__(.+?)__", re.DOTALL)
-_HEADER = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)     # # Заголовок
-_BULLET = re.compile(r"^\s{0,3}[-*•]\s+", re.MULTILINE)      # «- пункт» / «* пункт»
+_HEADER = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+_BULLET = re.compile(r"^\s{0,3}[-*•]\s+", re.MULTILINE)
 _MULTINL = re.compile(r"\n{3,}")
 _SPACED_DASH = re.compile(r"\s+[—–]\s+")
 
-# деньги: 250$, $300, 5000 сом, 185 usd, 5 тыс$
 _PRICE = re.compile(
     r"(?:\$\s?\d[\d\s.,]*|\d[\d\s.,]*\s?(?:\$|usd|долл|сом|руб|eur|€|тыс))",
-    re.IGNORECASE)
-# утвердительная гарантия визы (для ЛОГА, не для правки). «не гарантируем» исключаем.
-_GUARANTEE = re.compile(
-    r"(100\s?%|(?<!не )гаранти\w*|обязательно (?:дад|одобр|получ)|"
-    r"точно (?:дад|одобр|получ)|виза будет точно)",
-    re.IGNORECASE)
-# дисклеймер про цену уже присутствует?
-_DISCLAIMER_MARK = re.compile(
-    r"варьир|зависит от дат|может меня|уточним|подтвердим", re.IGNORECASE)
+    re.IGNORECASE,
+)
+_ADMISSION_GUARANTEE = re.compile(
+    r"(100\s?%|(?<!не )гаранти\w*|кепилдик\w*"
+    r"|точно (?:поступ|зачисл|пройд[её]те|получите грант)"
+    r"|обязательно (?:поступ|зачисл|пройд[её]те)"
+    r"|(?:грант|скидк\w+|зачислени\w+) (?:обеспечен|гарантирован)\w*)",
+    re.IGNORECASE,
+)
+_DISCOUNT_AMOUNT = re.compile(
+    r"(скидк\w*|арзандат\w*)[^.\n]{0,40}?\d+\s?%|"
+    r"\d+\s?%[^.\n]{0,25}(скидк|арзандат)",
+    re.IGNORECASE,
+)
+_PASSING_SCORE = re.compile(
+    r"(проходн\w+ балл|өтүү балл\w*)[^.\n]{0,30}\d+|"
+    r"\d+\s?балл\w*[^.\n]{0,30}(проходн|өтүү|порог)",
+    re.IGNORECASE,
+)
+_DURATION_3Y = re.compile(r"\b(3|три|үч)\s*(год|года|жыл)", re.IGNORECASE)
 
 
 def strip_markdown(text: str) -> str:
-    """Снять markdown-разметку → обычный текст мессенджера."""
     text = _BOLD.sub(r"\1", text)
     text = _UNDERSCORE.sub(r"\1", text)
     text = _HEADER.sub("", text)
@@ -53,32 +49,33 @@ def strip_markdown(text: str) -> str:
     return text.strip()
 
 
+def _price_numbers(text: str) -> list[int]:
+    numbers: list[int] = []
+    for match in _PRICE.finditer(text):
+        raw = re.sub(r"[^\d]", "", match.group(0))
+        if raw:
+            numbers.append(int(raw))
+    return numbers
+
+
 def validate_reply(text: str, funnel: str | None) -> tuple[str, list[str]]:
-    """Вернуть (очищенный_текст, список_нарушений).
-
-    Мутируем ТОЛЬКО безопасное (markdown, дисклеймер цен туров). Остальное — в список
-    нарушений для логирования, текст не трогаем.
-    """
     violations: list[str] = []
-
     clean = strip_markdown(text)
     if clean != text.strip():
         violations.append("markdown")
 
-    has_price = bool(_PRICE.search(clean))
+    if funnel == "admission":
+        if _ADMISSION_GUARANTEE.search(clean):
+            violations.append("admission_guarantee")
+        if any(n >= 100 and n != 6500 for n in _price_numbers(clean)):
+            violations.append("admission_price_mismatch")
+        if _DISCOUNT_AMOUNT.search(clean):
+            violations.append("admission_discount_amount")
+        if _PASSING_SCORE.search(clean):
+            violations.append("admission_passing_score")
+        if _DURATION_3Y.search(clean):
+            violations.append("admission_duration_claim")
 
-    # Туры: цены показываем, но обязателен дисклеймер изменчивости — допишем, если забыт.
-    if funnel == "tours" and has_price and not _DISCLAIMER_MARK.search(clean):
-        clean = f"{clean}\n\n{PRICE_DISCLAIMER}"
-        violations.append("tours_price_disclaimer_added")
-
-    # --- мягкие сигналы (только лог, без правки текста) ---
-    # Визы теперь называют официальный прайс услуг → цена тут НЕ нарушение. Билеты — цену
-    # называет менеджер, поэтому сумму в реплике бота помечаем.
-    if funnel == "tickets" and has_price:
-        violations.append("price_in_no_price_funnel")
-    if funnel == "visa" and _GUARANTEE.search(clean):
-        violations.append("possible_visa_guarantee")
     if len(clean) > MAX_LEN:
         violations.append("too_long")
     if clean.count("?") > 1:

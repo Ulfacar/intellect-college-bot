@@ -19,7 +19,7 @@ from app.config import settings
 @dataclass
 class DialogState:
     user_id: str
-    funnel: str | None = None          # tours | visa | tickets
+    funnel: str | None = None          # admission
     bot_id: str = ""
     manager_name: str = ""
     stage: str = "greeting"
@@ -54,13 +54,13 @@ class StateStore:
 class RedisStateStore:
     """Персистентное хранилище диалогов в Redis (прод).
 
-    Состояние сериализуется в JSON под ключом `frunze:dialog:<user_id>` и живёт
+    Состояние сериализуется в JSON под ключом `college:dialog:<user_id>` и живёт
     `settings.state_ttl_seconds` с момента последнего сообщения (неактивные
     диалоги сами вычищаются). Клиент можно подменить (тесты) — иначе ленивая
     инициализация `redis.asyncio` по `settings.redis_url`.
     """
 
-    KEY_PREFIX = "frunze:dialog:"
+    KEY_PREFIX = "college:dialog:"
 
     def __init__(self, redis_client: Any = None, ttl: int | None = None) -> None:
         self._redis = redis_client if redis_client is not None else _make_redis()

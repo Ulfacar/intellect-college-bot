@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Frunze — диалоги</title>
+  <title>Intellect College — приёмная</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -122,9 +122,7 @@
                    border-radius: var(--r); padding: 28px; text-align: center; font-size: 14px; }
     .inbox-list .card { margin-bottom: 0; }
     .funnel-badge { margin-left: auto; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
-    .funnel-badge[data-funnel="visa"] { background: var(--accent-soft); color: var(--accent); border-color: rgba(37,99,235,.20); }
-    .funnel-badge[data-funnel="tours"] { background: var(--green-soft); color: var(--green); border-color: rgba(5,150,105,.20); }
-    .funnel-badge[data-funnel="tickets"] { background: var(--warm-soft); color: var(--warm); border-color: rgba(217,119,6,.20); }
+    .funnel-badge[data-funnel="admission"] { background: var(--accent-soft); color: var(--accent); border-color: rgba(37,99,235,.20); }
 
     /* ---------- Card ---------- */
     .card { background: var(--elev); border: 1px solid var(--border); border-radius: var(--r-sm);
@@ -231,7 +229,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg></span>
-      <span>Frunze<small>диалоги</small></span>
+      <span>Intellect College<small>приёмная комиссия</small></span>
     </div>
     <nav class="tabs">
       <button class="tab active" data-tab="inbox"
@@ -534,7 +532,7 @@
         var s = await r.json(), n = s.waiting || 0;
         var badge = document.getElementById('inbox-badge');
         if (badge) { badge.textContent = n; badge.hidden = (n === 0); }
-        document.title = n > 0 ? '(' + n + ') Frunze — диалоги' : 'Frunze — диалоги';
+        document.title = n > 0 ? '(' + n + ') Intellect College — приёмная' : 'Intellect College — приёмная';
         if (_waiting !== null && n > _waiting) _beep();   // в очереди прибавилось → сигнал
         _waiting = n;
       } catch (_) { /* сеть моргнула — молча ждём следующего тика */ }

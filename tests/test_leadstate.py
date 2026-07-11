@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 
 from app.core.leadstate import is_noise, is_silent
 from app.integrations.panel.store import ConversationView, MessageView
@@ -13,12 +13,12 @@ def _conv(uid="u1", **kw):
     base = dict(
         user_id=uid,
         channel="whatsapp",
-        bot_id="frunze_tours",
+        bot_id="college_1",
         chat_id=f"{uid}@c.us",
-        funnel="tours",
+        funnel="admission",
         stage="qualification",
         last_sender="client",
-        last_text="хочу тур",
+        last_text="хочу поступление",
         last_message_at=datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
     )
     base.update(kw)
@@ -65,3 +65,4 @@ def test_is_silent_broad_stuck_leads_and_exclusions():
     assert is_silent(_conv("sent", followup_sent=True, last_message_at=old), now, _Cfg()) is False
     assert is_silent(_conv("spam", stage="greeting", last_text="https://instagram.com/ad",
                            last_message_at=old), now, _Cfg()) is False
+

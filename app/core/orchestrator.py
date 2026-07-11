@@ -22,12 +22,12 @@ from app.integrations.panel.store import get_conversation_store
 log = logging.getLogger("orchestrator")
 
 GREETING = (
-    "Здравствуйте! 😊 Это Frunze Travel. "
-    "Подскажите, что вас интересует — тур, виза или авиабилеты?"
+    "Здравствуйте! Это Айдана, приёмная комиссия Intellect IT & Business College 😊\n"
+    "Подскажите, вы рассматриваете поступление после 9 или после 11 класса?"
 )
 
 # Авто-исход диалога из стадии (ручные won/lost не перетираются — см. store).
-_OFFICE_STAGES = {"office", "office_consultation"}
+_OFFICE_STAGES = {"office", "office_consultation", "test_invite"}
 _MANAGER_STAGES = {"manager", "manager_handoff"}
 
 
@@ -56,17 +56,11 @@ def _auto_outcome(stage: str) -> str:
 def _default_manager_name(bot: BotConfig) -> str:
     if bot.manager_name:
         return bot.manager_name
-    if bot.scenario == "visa":
-        return "Медина"
-    if bot.id.endswith("sezim") or "sezim" in bot.id.lower():
-        return "Сезим"
-    if bot.scenario == "tours":
-        return "Адеми"
-    return "Сезим"
+    return "Айдана"
 
 NON_TEXT_FALLBACK = (
     "Голосовые сообщения пока не распознаём 🙏 Напишите, пожалуйста, словами — "
-    "или скажите «нужен менеджер», и я позову человека."
+    "или скажите «нужен менеджер», и я передам диалог человеку."
 )
 # Мягкий фолбэк, если ход не удалось обработать (сбой LLM/инструмента) — клиент НЕ
 # должен получать тишину или 500. Диалог не роняем, состояние сохраняем.
@@ -76,10 +70,7 @@ LLM_ERROR_FALLBACK = (
 
 
 class Orchestrator:
-    """Ведёт диалог одного бота. Если `bot` задан, его сценарий жёстко определяет
-    воронку (тур-боты не угадывают её по ключевым словам). Без `bot` (дев-демо в
-    Telegram) воронка определяется keyword-детектом, как раньше.
-    """
+    """Ведёт диалог одного бота."""
 
     def __init__(self, channel: ChannelAdapter, bot: BotConfig | None = None) -> None:
         self.channel = channel
@@ -313,30 +304,6 @@ class Orchestrator:
 
     async def _maybe_faq_reply(self, msg: Message, state, store) -> bool:
         """Try deterministic FAQ before LLM/funnel logic. Fail open to the normal flow."""
-        if state.funnel == "visa":
-            try:
-                from app.core.visa_pricing import self_visa_reply, visa_price_reply
-                answer = visa_price_reply(msg.text)
-                if answer is None:
-                    answer = self_visa_reply(
-                        msg.text,
-                        already_sent=bool(state.qualification.get("self_visa_retention_sent")),
-                    )
-                    if answer and state.qualification.get("self_visa_retention_sent"):
-                        state.stage = "manager"
-                        state.intercepted = True
-                    elif answer:
-                        state.qualification["self_visa_retention_sent"] = True
-                if answer:
-                    state.history.append({"role": "user", "content": msg.text})
-                    state.history.append({"role": "assistant", "content": answer})
-                    await store.save(state)
-                    await self._sync_card(msg, state)
-                    await self._reply(msg, answer)
-                    return True
-            except Exception:  # noqa: BLE001
-                log.warning("visa deterministic reply failed", exc_info=True)
-
         try:
             from app.core.faq import get_faq_store, match_faq, qualification_question
             faq_store = get_faq_store()

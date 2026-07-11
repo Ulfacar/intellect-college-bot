@@ -31,6 +31,7 @@
           <div class="card-id">
             <div class="nm">{{ c.name }}</div>
             {% if c.name != c.phone %}<div class="ph">{{ c.phone }}</div>{% endif %}
+            {% if c.qualification_line %}<div class="ph">{{ c.qualification_line }}</div>{% endif %}
           </div>
         </div>
         {% if c.last_text %}

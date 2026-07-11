@@ -9,17 +9,9 @@ from typing import Any
 from sqlalchemy import or_, select
 
 from app.config import settings
-from app.core.branding import (
-    FRUNZE_DESTINATIONS,
-    FRUNZE_OFFICE_ADDRESS,
-    FRUNZE_WORKING_HOURS,
-    GETVISA_WORKING_HOURS,
-    PRICE_DISCLAIMER,
-    TOUR_BOOKING_TERMS,
-    VISA_SERVICE_PRICES,
-)
+from app.core.branding import COLLEGE_ADDRESS
 
-VALID_FUNNELS = {"visa", "tours", "tickets"}
+VALID_FUNNELS = {"admission"}
 
 
 @dataclass
@@ -84,12 +76,8 @@ def qualification_question(funnel: str | None, field: str | None) -> str | None:
     """Return the existing fallback qualification question for the current field."""
     if not funnel or not field:
         return None
-    if funnel == "visa":
-        from app.funnels.visa import _ask_for
-    elif funnel == "tours":
-        from app.funnels.tours import _ask_for
-    elif funnel == "tickets":
-        from app.funnels.tickets import _ask_for
+    if funnel == "admission":
+        from app.funnels.admission import _ask_for
     else:
         return None
     return _ask_for(field)
@@ -281,10 +269,10 @@ async def seed_defaults() -> None:
             ],
             "negative_terms": [],
             "answer": (
-                f"Frunze Travel (туры/билеты): {FRUNZE_WORKING_HOURS}. "
-                f"Frunze Travel (визы): {GETVISA_WORKING_HOURS}."
+                "Точные часы работы приёмной комиссии сейчас уточняются. "
+                "Передала вопрос менеджеру — он ответит здесь в рабочее время."
             ),
-            "handoff_only": False,
+            "handoff_only": True,
             "allow_during_qualification": True,
         },
         {
@@ -302,160 +290,197 @@ async def seed_defaults() -> None:
                 "кайда жайгашкан",
             ],
             "negative_terms": [],
-            "answer": f"Офис Frunze Travel: {FRUNZE_OFFICE_ADDRESS}.",
+            "answer": (
+                f"Мы находимся по адресу: {COLLEGE_ADDRESS}. Будем рады видеть вас! "
+                "Подсказать что-то по поступлению?"
+            ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "visa",
+            "funnel": "admission",
             "enabled": True,
-            "priority": 30,
-            "title": "Стоимость визовых услуг",
+            "priority": 40,
+            "title": "Стоимость обучения",
             "patterns": [
                 "сколько стоит",
                 "цена",
                 "стоимость",
                 "прайс",
-                "сколько за визу",
+                "оплата",
                 "канча турат",
+                "окуу канча",
             ],
-            "negative_terms": ["тур", "билет", "авиа", "отел"],
+            "negative_terms": ["за год", "за курс", "за все", "за всё"],
             "answer": (
-                "Подскажите, по какой стране нужна цена? Напишите страну, и я назову "
-                "официальный прайс только по ней."
+                "Стоимость обучения по контракту — 6500 долларов. После вступительного теста "
+                "предусмотрена персональная скидка, её размер озвучит менеджер. Хотите, запишу вас на тест?"
             ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "tours",
-            "enabled": True,
-            "priority": 20,
-            "title": "Направления туров",
-            "patterns": [
-                "какие направлени",
-                "куда можно поехать",
-                "куда поехать",
-                "какие страны",
-                "направления",
-                "кайда барса",
-            ],
-            "negative_terms": [],
-            "answer": f"По турам работаем с такими направлениями: {FRUNZE_DESTINATIONS}",
-            "handoff_only": False,
-            "allow_during_qualification": True,
-        },
-        {
-            "funnel": "visa",
+            "funnel": "admission",
             "enabled": True,
             "priority": 35,
-            "title": "Self-visa удержание",
+            "title": "Направления",
             "patterns": [
-                "сам оформлю",
-                "сама оформлю",
-                "сам подам",
-                "без вас",
-                "селф виза",
-                "self visa",
-                "самостоятельно оформлю",
+                "какие направлени",
+                "какие специальности",
+                "какие профессии",
+                "направления",
+                "багыт",
+                "кандай багыт",
             ],
             "negative_terms": [],
             "answer": (
-                "Понимаю, можно попробовать самостоятельно. Мы полезны тем, что проверяем анкету, "
-                "снижаем риск ошибок и готовим к интервью. Хотите, я передам менеджеру на короткую консультацию?"
+                "У нас 8 направлений. IT: кибербезопасность и этичный хакинг, программная инженерия и ИИ, "
+                "DevOps, Front-end/Back-end веб-разработка, создание цифровых продуктов. Бизнес: "
+                "бизнес-аналитика и финансы, маркетинг, менеджмент, графический дизайн и UX/UI. "
+                "Какое из них вам ближе?"
             ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "visa",
+            "funnel": "admission",
+            "enabled": True,
+            "priority": 35,
+            "title": "Вступительный тест",
+            "patterns": [
+                "что за тест",
+                "какой тест",
+                "предметы тест",
+                "вступительный тест",
+                "тест кандай",
+                "кирүү тест",
+            ],
+            "negative_terms": [],
+            "answer": (
+                "Вступительный тест — по математике и английскому языку, длится 1,5 часа. "
+                "Дату, время и формат подтвердит менеджер при записи. Записать вас?"
+            ),
+            "handoff_only": False,
+            "allow_during_qualification": True,
+        },
+        {
+            "funnel": "admission",
             "enabled": True,
             "priority": 25,
-            "title": "Гарантии по визе",
+            "title": "Гарантии поступления",
             "patterns": [
-                "гарантия визы",
+                "гарантия поступления",
                 "гарантируете",
-                "точно дадут",
+                "точно поступлю",
+                "точно поступит",
+                "точно пройду",
                 "100 процентов",
-                "шансы",
+                "грант",
+                "кепилдик",
             ],
             "negative_terms": [],
             "answer": (
-                "Визу мы не гарантируем, решение принимает консульство. Мы помогаем грамотно заполнить анкету, "
-                "подготовиться к интервью и снизить риск ошибок."
+                "Поступление, грант и прохождение теста мы не гарантируем. Менеджер честно подскажет "
+                "условия и следующий шаг по вашей ситуации."
             ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "visa",
+            "funnel": "admission",
             "enabled": True,
             "priority": 25,
-            "title": "Документы для визы США",
+            "title": "Документы",
             "patterns": [
-                "документы сша",
-                "что нужно для сша",
-                "какие документы для визы сша",
-                "документы на американскую визу",
+                "документы",
+                "какие документы",
+                "что нужно из документов",
+                "документ",
+                "кандай документ",
             ],
             "negative_terms": [],
             "answer": (
-                "Для туристической визы США обычно нужны загранпаспорт и справка с работы. "
-                "Полный набор зависит от вашей ситуации, его уточнит эксперт на консультации."
+                "Нужно свидетельство о рождении. Если уже есть паспорт — достаточно только паспорта. "
+                "Подсказать что-то ещё по поступлению?"
             ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "visa",
+            "funnel": "admission",
             "enabled": True,
             "priority": 25,
-            "title": "Отказ в визе",
+            "title": "Дедлайн приёма",
             "patterns": [
-                "был отказ",
-                "отказали в визе",
-                "после отказа",
-                "отказ сша",
+                "до какого числа",
+                "дедлайн",
+                "до когда прием",
+                "до когда приём",
+                "качанга чейин",
+                "качан чейин",
             ],
             "negative_terms": [],
             "answer": (
-                "После отказа подаваться повторно можно, обычно важно показать изменения в ситуации. "
-                "Скажите, пожалуйста, в какой стране и в каком году был отказ?"
+                "Приём идёт до 12 августа. Лучше не откладывать: успеем и тест пройти, и всё оформить. "
+                "Вы после 9 или после 11 класса?"
             ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "tours",
+            "funnel": "admission",
             "enabled": True,
             "priority": 25,
-            "title": "Бронь и оплата тура",
+            "title": "После 9 или 11 класса",
             "patterns": [
-                "как забронировать",
-                "что нужно для брони",
-                "предоплата",
-                "оплата тура",
-                "паспорт для тура",
+                "после 9",
+                "после девятого",
+                "после 11",
+                "после одиннадцатого",
+                "9 класса",
+                "11 класса",
+                "9-класстан",
+                "11-класстан",
             ],
             "negative_terms": [],
-            "answer": f"Для брони нужен загранпаспорт. {TOUR_BOOKING_TERMS}",
+            "answer": (
+                "Да, мы принимаем и после 9, и после 11 класса. После 9 класса обучение длится "
+                "2 года 10 месяцев. Вам какой вариант актуален?"
+            ),
             "handoff_only": False,
             "allow_during_qualification": True,
         },
         {
-            "funnel": "tours",
+            "funnel": "admission",
             "enabled": True,
             "priority": 25,
-            "title": "Почему цена тура меняется",
+            "title": "Скидка",
             "patterns": [
-                "почему цена меняется",
-                "цена изменилась",
-                "актуальная цена",
-                "почему дороже",
+                "скидка",
+                "скидки",
+                "арзандатуу",
+                "арзандат",
             ],
             "negative_terms": [],
-            "answer": PRICE_DISCLAIMER,
+            "answer": (
+                "Да, скидки есть — персональная скидка определяется после вступительного теста, "
+                "размер озвучит менеджер. Давайте запишу вас на тест?"
+            ),
             "handoff_only": False,
+            "allow_during_qualification": True,
+        },
+        {
+            "funnel": "admission",
+            "enabled": True,
+            "priority": 30,
+            "title": "Проходной балл",
+            "patterns": ["проходной балл", "порог", "сколько баллов", "өтүү балл"],
+            "negative_terms": [],
+            "answer": (
+                "Точный проходной балл подскажет менеджер, я передала ему ваш вопрос — ответит здесь. "
+                "Могу пока рассказать, из чего состоит тест, хотите?"
+            ),
+            "handoff_only": True,
             "allow_during_qualification": True,
         },
     ]

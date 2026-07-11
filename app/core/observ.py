@@ -11,7 +11,7 @@ import time
 _COUNTERS: dict[str, int] = {"llm_failures": 0, "send_failures": 0}
 _LAST_TS: dict[str, float] = {"llm_failure_ts": 0.0, "send_failure_ts": 0.0}
 _INBOUND: dict[str, float] = {"ts": 0.0}
-# Сработки валидатора ответов по виду нарушения (markdown, possible_visa_guarantee, …) —
+# Сработки валидатора ответов по виду нарушения (markdown, admission_guarantee, …) —
 # чтобы видеть, как часто модель отклоняется от политики, не калеча ответ.
 _VALIDATIONS: dict[str, int] = {}
 

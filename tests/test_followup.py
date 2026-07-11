@@ -1,4 +1,4 @@
-"""Тесты автодожима, watchdog-алертов и фонового планировщика."""
+﻿"""Тесты автодожима, watchdog-алертов и фонового планировщика."""
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -30,8 +30,8 @@ def test_select_followup_targets():
     fresh = now - timedelta(hours=2)
 
     def conv(uid, **kw):
-        base = dict(user_id=uid, channel="whatsapp", bot_id="getvisa", chat_id=uid + "@c.us",
-                    funnel="visa", stage="qualification", last_sender="bot", last_message_at=old)
+        base = dict(user_id=uid, channel="whatsapp", bot_id="college_2", chat_id=uid + "@c.us",
+                    funnel="admission", stage="qualification", last_sender="bot", last_message_at=old)
         base.update(kw)
         return ConversationView(**base)
 
@@ -64,10 +64,10 @@ def test_followup_run_sends_once(monkeypatch):
     from app.core import flags
     flags.reset()
     store = ps.get_conversation_store()
-    asyncio.run(store.add_message("getvisa:99", "bot", "вопрос?", channel="whatsapp",
-                                  bot_id="getvisa", chat_id="99@c.us"))
-    asyncio.run(store.update_meta("getvisa:99", funnel="visa", stage="qualification"))
-    conv = asyncio.run(store.get("getvisa:99"))
+    asyncio.run(store.add_message("college_2:99", "bot", "вопрос?", channel="whatsapp",
+                                  bot_id="college_2", chat_id="99@c.us"))
+    asyncio.run(store.update_meta("college_2:99", funnel="admission", stage="qualification"))
+    conv = asyncio.run(store.get("college_2:99"))
     conv.last_message_at = datetime.now(timezone.utc) - timedelta(hours=30)  # «намолчался»
 
     sent = []
@@ -84,7 +84,7 @@ def test_followup_run_sends_once(monkeypatch):
 
     asyncio.run(followup.run())
     assert sent and sent[0][0] == "99@c.us"
-    conv2 = asyncio.run(store.get("getvisa:99"))
+    conv2 = asyncio.run(store.get("college_2:99"))
     assert conv2.followup_sent is True and conv2.stage == "follow_up"
 
     sent.clear()
@@ -99,8 +99,8 @@ def test_select_awaiting_targets():
     fresh = now - timedelta(minutes=3)
 
     def conv(uid, **kw):
-        base = dict(user_id=uid, phone=uid, channel="whatsapp", bot_id="getvisa",
-                    funnel="visa", stage="manager", last_sender="client",
+        base = dict(user_id=uid, phone=uid, channel="whatsapp", bot_id="college_2",
+                    funnel="admission", stage="manager", last_sender="client",
                     last_message_at=old, outcome="manager")
         base.update(kw)
         return ConversationView(**base)
@@ -124,10 +124,10 @@ def test_awaiting_run_sends_then_cooldown(monkeypatch):
     flags.reset()
     awaiting._alerted.clear()
     store = ps.get_conversation_store()
-    asyncio.run(store.add_message("getvisa:55", "client", "алло", channel="whatsapp",
-                                  bot_id="getvisa", chat_id="55@c.us", phone="996700055"))
-    asyncio.run(store.update_meta("getvisa:55", funnel="visa", stage="manager"))
-    conv = asyncio.run(store.get("getvisa:55"))
+    asyncio.run(store.add_message("college_2:55", "client", "алло", channel="whatsapp",
+                                  bot_id="college_2", chat_id="55@c.us", phone="996700055"))
+    asyncio.run(store.update_meta("college_2:55", funnel="admission", stage="manager"))
+    conv = asyncio.run(store.get("college_2:55"))
     conv.last_message_at = datetime.now(timezone.utc) - timedelta(minutes=20)  # ждёт давно
 
     sent = []
@@ -138,7 +138,7 @@ def test_awaiting_run_sends_then_cooldown(monkeypatch):
 
     monkeypatch.setattr(awaiting.outbound, "send_to_client", fake_send)
     monkeypatch.setattr(awaiting.settings, "alert_whatsapp_to", "996700@c.us")
-    monkeypatch.setattr(awaiting.settings, "alert_bot_id", "getvisa")
+    monkeypatch.setattr(awaiting.settings, "alert_bot_id", "college_2")
     monkeypatch.setattr(awaiting.settings, "alert_awaiting_minutes", 10)
     monkeypatch.setattr(awaiting.settings, "alert_cooldown_minutes", 60)
 
@@ -183,3 +183,4 @@ def test_scheduler_runs_and_isolates_failures():
     asyncio.run(scheduler.run_once())       # упавшая bad не валит прогон
     assert calls == ["g"]
     scheduler._reset_for_tests()
+

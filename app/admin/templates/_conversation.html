@@ -8,7 +8,7 @@
       <div class="ph-sub">
         <span class="tag">{{ c.phone }}</span>
         <span class="tag">{{ c.channel or '—' }}</span>
-        <span class="tag">{{ c.funnel or '—' }} · {{ c.stage }}</span>
+        <span class="tag">{{ c.funnel or '—' }} · {{ stage_label }}</span>
         <span class="tag temp-{{ c.lead_temperature }}">{{ {'new':'новый','warm':'тёплый','hot':'горячий'}.get(c.lead_temperature, c.lead_temperature) }}</span>
       </div>
     </div>
@@ -78,8 +78,8 @@
 
   {% if c.qualification %}
   <div class="brief">
-    <div class="brief-title">Что узнал бот</div>
-    {% for k, v in c.qualification.items() %}
+    <div class="brief-title">Карточка абитуриента</div>
+    {% for k, v in qualification_rows %}
     <div class="brief-row"><span class="k">{{ k }}</span><span>{{ v }}</span></div>
     {% endfor %}
   </div>

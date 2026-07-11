@@ -1,6 +1,6 @@
-"""Дебаунс входящих: быстрые реплики клиента склеиваются в один ход LLM.
+﻿"""Дебаунс входящих: быстрые реплики клиента склеиваются в один ход LLM.
 
-При DEBOUNCE_SECONDS>0 несколько коротких сообщений подряд («Хочу в Турцию» / «2 взрослых» /
+При DEBOUNCE_SECONDS>0 несколько коротких сообщений подряд («Хочу в поступлениецию» / «2 взрослых» /
 «конец июля») должны собраться в один ход и дать ОДИН связный ответ (без задвоений), при этом
 каждое входящее логируется в панель сразу. При 0 — синхронное поведение как раньше.
 """
@@ -55,13 +55,13 @@ def test_debounce_coalesces_rapid_messages(monkeypatch):
     monkeypatch.setattr(orch, "get_funnel", lambda name: funnel)
 
     state = asyncio.run(state_store.load("deb-user"))
-    state.funnel = "tours"
+    state.funnel = "admission"
 
     ch = FakeChannel()
     orchestrator = Orchestrator(channel=ch)
 
     async def fire():
-        for t in ("Хочу в Турцию", "2 взрослых", "конец июля"):
+        for t in ("Хочу в поступлениецию", "2 взрослых", "конец июля"):
             await orchestrator.handle(
                 Message(channel="telegram", user_id="deb-user", chat_id="1", text=t))
         await asyncio.sleep(0.2)  # дать тихому окну истечь и флашу отработать
@@ -69,13 +69,13 @@ def test_debounce_coalesces_rapid_messages(monkeypatch):
     asyncio.run(fire())
 
     # Воронка вызвана РОВНО один раз — со склеенным текстом всех трёх реплик.
-    assert funnel.calls == ["Хочу в Турцию\n2 взрослых\nконец июля"]
+    assert funnel.calls == ["Хочу в поступлениецию\n2 взрослых\nконец июля"]
     # Отправлен ОДИН ответ (без задвоений).
-    assert ch.sent == [("1", "ответ на: Хочу в Турцию\n2 взрослых\nконец июля")]
+    assert ch.sent == [("1", "ответ на: Хочу в поступлениецию\n2 взрослых\nконец июля")]
     # Все три входящих залогированы в панель сразу.
     conv = asyncio.run(get_conversation_store().get("deb-user"))
     client_msgs = [m.text for m in conv.messages if m.sender == "client"]
-    assert client_msgs == ["Хочу в Турцию", "2 взрослых", "конец июля"]
+    assert client_msgs == ["Хочу в поступлениецию", "2 взрослых", "конец июля"]
 
 
 def test_debounce_off_is_inline(monkeypatch):
@@ -92,7 +92,7 @@ def test_debounce_off_is_inline(monkeypatch):
     monkeypatch.setattr(orch, "get_funnel", lambda name: funnel)
 
     state = asyncio.run(state_store.load("inl-user"))
-    state.funnel = "tours"
+    state.funnel = "admission"
 
     ch = FakeChannel()
     orchestrator = Orchestrator(channel=ch)
@@ -101,3 +101,4 @@ def test_debounce_off_is_inline(monkeypatch):
 
     assert funnel.calls == ["привет"]
     assert ch.sent == [("9", "ответ на: привет")]
+

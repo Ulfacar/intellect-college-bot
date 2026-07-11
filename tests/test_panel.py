@@ -1,4 +1,4 @@
-"""Тесты админ-панели: лог диалогов (store), логирование оркестратором,
+﻿"""Тесты админ-панели: лог диалогов (store), логирование оркестратором,
 перехват (бот замолкает), эндпоинты доски + авторизация.
 """
 import asyncio
@@ -60,12 +60,12 @@ def test_postgres_conversation_store_round_trip():
         sm = async_sessionmaker(engine, expire_on_commit=False)
         store = PostgresConversationStore(sessionmaker=sm)
 
-        await store.add_message("996700111", "client", "виза в США", channel="whatsapp", bot_id="getvisa")
-        await store.update_meta("996700111", funnel="visa", stage="qualification",
+        await store.add_message("996700111", "client", "поступление в США", channel="whatsapp", bot_id="college_2")
+        await store.update_meta("996700111", funnel="admission", stage="qualification",
                                 qualification={"name": "Саодат"})
         await store.add_message("996700111", "bot", "Как могу к вам обращаться?")
 
-        cards = await store.list_cards("visa")
+        cards = await store.list_cards("admission")
         assert len(cards) == 1
         assert cards[0].user_id == "996700111"
         assert cards[0].last_text == "Как могу к вам обращаться?"
@@ -87,17 +87,17 @@ def test_archived_conversation_hidden_from_lists():
         sm = async_sessionmaker(engine, expire_on_commit=False)
         store = PostgresConversationStore(sessionmaker=sm)
 
-        await store.add_message("u-active", "client", "нужна виза", channel="whatsapp")
-        await store.update_meta("u-active", funnel="visa")
+        await store.add_message("u-active", "client", "нужна поступление", channel="whatsapp")
+        await store.update_meta("u-active", funnel="admission")
         await store.add_message("u-archived", "client", "https://instagram.com/ad", channel="whatsapp")
-        await store.update_meta("u-archived", funnel="visa")
+        await store.update_meta("u-archived", funnel="admission")
         await store.set_archived("u-archived", True)
 
-        assert [c.user_id for c in await store.list_cards("visa")] == ["u-active"]
+        assert [c.user_id for c in await store.list_cards("admission")] == ["u-active"]
         assert [c.user_id for c in await store.all_conversations()] == ["u-active"]
 
         await store.set_archived("u-archived", False)
-        assert {c.user_id for c in await store.list_cards("visa")} == {"u-active", "u-archived"}
+        assert {c.user_id for c in await store.list_cards("admission")} == {"u-active", "u-archived"}
         await engine.dispose()
 
     asyncio.run(scenario())
@@ -113,12 +113,12 @@ def test_postgres_bulk_archive_hides_from_lists():
 
         for uid in ("u-active", "u-bulk-1", "u-bulk-2"):
             await store.add_message(uid, "client", "hello", channel="whatsapp")
-            await store.update_meta(uid, funnel="visa")
+            await store.update_meta(uid, funnel="admission")
 
         changed = await store.set_archived_many(["u-bulk-1", "u-bulk-2"], True)
 
         assert changed == 2
-        assert [c.user_id for c in await store.list_cards("visa")] == ["u-active"]
+        assert [c.user_id for c in await store.list_cards("admission")] == ["u-active"]
         assert [c.user_id for c in await store.all_conversations()] == ["u-active"]
         await engine.dispose()
 
@@ -134,14 +134,14 @@ def test_postgres_add_message_unarchives_existing_dialog():
         store = PostgresConversationStore(sessionmaker=sm)
 
         await store.add_message("u-return", "client", "old", channel="whatsapp")
-        await store.update_meta("u-return", funnel="tours")
+        await store.update_meta("u-return", funnel="admission")
         await store.set_archived("u-return", True)
 
         await store.add_message("u-return", "client", "new", channel="whatsapp")
 
         conv = await store.get("u-return")
         assert conv.archived is False
-        assert [c.user_id for c in await store.list_cards("tours")] == ["u-return"]
+        assert [c.user_id for c in await store.list_cards("admission")] == ["u-return"]
         await engine.dispose()
 
     asyncio.run(scenario())
@@ -150,13 +150,13 @@ def test_postgres_add_message_unarchives_existing_dialog():
 def test_memory_archived_conversation_hidden_from_lists():
     async def scenario():
         store = panel_store.MemoryConversationStore()
-        await store.add_message("u-active", "client", "нужна виза", channel="whatsapp")
-        await store.update_meta("u-active", funnel="visa")
+        await store.add_message("u-active", "client", "нужна поступление", channel="whatsapp")
+        await store.update_meta("u-active", funnel="admission")
         await store.add_message("u-archived", "client", "https://instagram.com/ad", channel="whatsapp")
-        await store.update_meta("u-archived", funnel="visa")
+        await store.update_meta("u-archived", funnel="admission")
         await store.set_archived("u-archived", True)
 
-        assert [c.user_id for c in await store.list_cards("visa")] == ["u-active"]
+        assert [c.user_id for c in await store.list_cards("admission")] == ["u-active"]
         assert [c.user_id for c in await store.all_conversations()] == ["u-active"]
 
     asyncio.run(scenario())
@@ -166,14 +166,14 @@ def test_memory_add_message_unarchives_existing_dialog():
     async def scenario():
         store = panel_store.MemoryConversationStore()
         await store.add_message("u-return", "client", "old", channel="whatsapp")
-        await store.update_meta("u-return", funnel="tours")
+        await store.update_meta("u-return", funnel="admission")
         await store.set_archived("u-return", True)
 
         await store.add_message("u-return", "client", "new", channel="whatsapp")
 
         conv = await store.get("u-return")
         assert conv.archived is False
-        assert [c.user_id for c in await store.list_cards("tours")] == ["u-return"]
+        assert [c.user_id for c in await store.list_cards("admission")] == ["u-return"]
 
     asyncio.run(scenario())
 
@@ -183,12 +183,12 @@ def test_memory_bulk_archive_hides_from_lists():
         store = panel_store.MemoryConversationStore()
         for uid in ("u-active", "u-bulk-1", "u-bulk-2"):
             await store.add_message(uid, "client", "hello", channel="whatsapp")
-            await store.update_meta(uid, funnel="visa")
+            await store.update_meta(uid, funnel="admission")
 
         changed = await store.set_archived_many(["u-bulk-1", "u-bulk-2"], True)
 
         assert changed == 2
-        assert [c.user_id for c in await store.list_cards("visa")] == ["u-active"]
+        assert [c.user_id for c in await store.list_cards("admission")] == ["u-active"]
         assert [c.user_id for c in await store.all_conversations()] == ["u-active"]
 
     asyncio.run(scenario())
@@ -201,9 +201,9 @@ def test_card_model_flags_client_waiting():
     from app.integrations.panel.store import ConversationView
 
     now = datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc)
-    conv = ConversationView(user_id="996700777", funnel="visa", stage="qualification",
+    conv = ConversationView(user_id="996700777", funnel="admission", stage="qualification",
                             qualification={"name": "Айгуль"}, last_sender="client",
-                            last_text="а виза за сколько дней?",
+                            last_text="а поступление за сколько дней?",
                             last_message_at=now - timedelta(minutes=25))
     m = _card_model(conv, now)
     assert m["initials"] == "АЙ"
@@ -218,10 +218,10 @@ def test_card_model_marks_link_only_greeting_as_noise():
     from app.integrations.panel.store import ConversationView
 
     now = datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc)
-    noise = ConversationView(user_id="spam", funnel="tours", stage="greeting",
+    noise = ConversationView(user_id="spam", funnel="admission", stage="greeting",
                              last_sender="client", last_text="https://instagram.com/promo",
                              last_message_at=now)
-    qualified = ConversationView(user_id="real", funnel="tours", stage="greeting",
+    qualified = ConversationView(user_id="real", funnel="admission", stage="greeting",
                                  last_sender="client", last_text="https://instagram.com/profile",
                                  qualification={"name": "Айгуль"},
                                  last_message_at=now)
@@ -236,7 +236,7 @@ def test_board_maps_follow_up_stage():
     from app.admin.router import _build_board
     from app.integrations.panel.store import ConversationView
 
-    conv = ConversationView(user_id="996700888", funnel="visa", stage="follow_up")
+    conv = ConversationView(user_id="996700888", funnel="admission", stage="follow_up")
     columns, _ = _build_board([conv], datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc))
 
     follow_up = next(c for c in columns if c["key"] == "follow_up")
@@ -252,13 +252,13 @@ def test_board_routes_silent_leads_to_computed_column():
     now = datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc)
     conv = ConversationView(
         user_id="silent-1",
-        funnel="tours",
+        funnel="admission",
         stage="qualification",
         channel="whatsapp",
-        bot_id="frunze_tours",
+        bot_id="college_1",
         chat_id="silent-1@c.us",
         last_sender="client",
-        last_text="а что по туру?",
+        last_text="а что по поступлениеу?",
         last_message_at=now - timedelta(hours=30),
     )
 
@@ -277,17 +277,17 @@ def test_orchestrator_logs_client_and_bot(monkeypatch):
     _clear_memory()
     monkeypatch.setattr("app.agent.llm.settings.openrouter_api_key", "")
     ch = _FakeChannel()
-    bot = BotConfig(id="frunze_tours_1", scenario="tours")
-    asyncio.run(Orchestrator(channel=ch, bot=bot).handle(_msg("u-log-1", "хочу тур")))
+    bot = BotConfig(id="college_1", scenario="admission")
+    asyncio.run(Orchestrator(channel=ch, bot=bot).handle(_msg("u-log-1", "хочу поступление")))
 
     # Диалог хранится по композитному ключу bot_id:номер; сам номер — в phone.
-    conv = asyncio.run(panel_store.get_conversation_store().get("frunze_tours_1:u-log-1"))
+    conv = asyncio.run(panel_store.get_conversation_store().get("college_1:u-log-1"))
     assert conv is not None
     assert conv.phone == "u-log-1"
-    assert conv.funnel == "tours"
+    assert conv.funnel == "admission"
     assert [m.sender for m in conv.messages] == ["client", "bot"]
-    assert conv.messages[0].text == "хочу тур"
-    assert "Лид на тур" in conv.ai_summary
+    assert conv.messages[0].text == "хочу поступление"
+    assert "Абитуриент" in conv.ai_summary
     assert conv.manager_next_step
     assert conv.lead_temperature in {"new", "warm", "hot"}
     assert ch.sent  # бот ответил
@@ -298,9 +298,9 @@ def test_takeover_mutes_bot_but_logs_client(monkeypatch):
     _clear_memory()
     monkeypatch.setattr("app.agent.llm.settings.openrouter_api_key", "")
     ch = _FakeChannel()
-    orch = Orchestrator(channel=ch, bot=BotConfig(id="frunze_tours_1", scenario="tours"))
+    orch = Orchestrator(channel=ch, bot=BotConfig(id="college_1", scenario="admission"))
 
-    key = "frunze_tours_1:u-int-1"  # ключ диалога = bot_id:номер
+    key = "college_1:u-int-1"  # ключ диалога = bot_id:номер
     asyncio.run(orch.handle(_msg("u-int-1", "здравствуйте")))
     assert len(ch.sent) == 1  # бот ответил на первое
 
@@ -321,18 +321,18 @@ def test_takeover_mutes_bot_but_logs_client(monkeypatch):
 # ---------------- эндпоинты доски + авторизация ----------------
 def test_board_requires_auth():
     client = TestClient(main.app)
-    assert client.get("/admin/board/visa").status_code == 401
+    assert client.get("/admin/board/admission").status_code == 401
 
 
 def test_board_renders_card_with_auth(monkeypatch):
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_message("996700222", "client", "виза в Канаду", channel="whatsapp"))
-    asyncio.run(store.update_meta("996700222", funnel="visa", stage="qualification",
+    asyncio.run(store.add_message("996700222", "client", "поступление в Канаду", channel="whatsapp"))
+    asyncio.run(store.update_meta("996700222", funnel="admission", stage="qualification",
                                   qualification={"name": "Адам"}))
 
     client = _auth_client()
-    resp = client.get("/admin/board/visa")
+    resp = client.get("/admin/board/admission")
     assert resp.status_code == 200
     assert "996700222" in resp.text
     assert "Адам" in resp.text
@@ -343,14 +343,14 @@ def test_archive_endpoint_hides_card_and_audits():
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("u-archive-1", "client", "https://instagram.com/ad", channel="whatsapp"))
-    asyncio.run(store.update_meta("u-archive-1", funnel="visa", stage="greeting"))
+    asyncio.run(store.update_meta("u-archive-1", funnel="admission", stage="greeting"))
 
     client = _auth_client()
-    assert "u-archive-1" in client.get("/admin/board/visa").text
+    assert "u-archive-1" in client.get("/admin/board/admission").text
     resp = client.post("/admin/conversation/u-archive-1/archive")
     assert resp.status_code == 200 and resp.json()["ok"] is True
 
-    assert "u-archive-1" not in client.get("/admin/board/visa").text
+    assert "u-archive-1" not in client.get("/admin/board/admission").text
     assert "u-archive-1" not in client.get("/admin/search", params={"q": "archive"}).text
     assert any(a["action"] == "archive" and a["user_id"] == "u-archive-1"
                for a in panel_store._memory_store._audit)
@@ -362,7 +362,7 @@ def test_bulk_archive_endpoint_hides_cards_and_audits():
     store = panel_store.get_conversation_store()
     for uid in ("u-live", "u-bulk-a", "u-bulk-b"):
         asyncio.run(store.add_message(uid, "client", "archive me", channel="whatsapp"))
-        asyncio.run(store.update_meta(uid, funnel="visa", stage="qualification"))
+        asyncio.run(store.update_meta(uid, funnel="admission", stage="qualification"))
 
     client = _auth_client()
     resp = client.post("/admin/conversations/archive",
@@ -370,7 +370,7 @@ def test_bulk_archive_endpoint_hides_cards_and_audits():
 
     assert resp.status_code == 200
     assert 'data-user-id="u-bulk-a"' not in resp.text and 'data-user-id="u-bulk-b"' not in resp.text
-    board = client.get("/admin/board/visa").text
+    board = client.get("/admin/board/admission").text
     assert "u-live" in board
     assert "u-bulk-a" not in board
     assert any(a["action"] == "archive_many" and a["detail"] == "count=2"
@@ -381,11 +381,11 @@ def test_archive_noise_endpoint_uses_card_noise_logic_and_audits():
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("noise-1", "client", "https://instagram.com/ad", channel="whatsapp"))
-    asyncio.run(store.update_meta("noise-1", funnel="tours", stage="greeting"))
+    asyncio.run(store.update_meta("noise-1", funnel="admission", stage="greeting"))
     asyncio.run(store.add_message("noise-2", "client", "https://t.me/ad", channel="whatsapp"))
-    asyncio.run(store.update_meta("noise-2", funnel="visa", stage="greeting"))
+    asyncio.run(store.update_meta("noise-2", funnel="admission", stage="greeting"))
     asyncio.run(store.add_message("real-1", "client", "https://instagram.com/ad", channel="whatsapp"))
-    asyncio.run(store.update_meta("real-1", funnel="visa", stage="qualification",
+    asyncio.run(store.update_meta("real-1", funnel="admission", stage="qualification",
                                   qualification={"name": "Lead"}))
 
     client = _auth_client()
@@ -403,7 +403,7 @@ def test_manager_send_replies_and_takes_over(monkeypatch):
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("996700333", "client", "здравствуйте", channel="whatsapp",
-                                  bot_id="getvisa", chat_id="996700333@c.us"))
+                                  bot_id="college_2", chat_id="996700333@c.us"))
 
     sent = []
     async def fake_send(channel, bot_id, chat_id, text):
@@ -417,7 +417,7 @@ def test_manager_send_replies_and_takes_over(monkeypatch):
     assert resp.status_code == 200
 
     # Адаптер вызван с правильным адресом ответа (chat_id, не user_id).
-    assert sent == [("whatsapp", "getvisa", "996700333@c.us", "Это менеджер Медина, помогу вам")]
+    assert sent == [("whatsapp", "college_2", "996700333@c.us", "Это менеджер Медина, помогу вам")]
 
     conv = asyncio.run(store.get("996700333"))
     assert conv.messages[-1].sender == "manager"
@@ -434,7 +434,7 @@ def test_conversation_renders_manager_brief(monkeypatch):
     asyncio.run(store.add_message("996700444", "client", "хочу визу в США", channel="whatsapp"))
     asyncio.run(store.update_meta(
         "996700444",
-        funnel="visa",
+        funnel="admission",
         stage="office",
         qualification={"name": "Алия", "country": "США"},
         ai_summary="Визовый лид. Уже собрано: имя: Алия; страна: США.",
@@ -458,7 +458,7 @@ def test_manager_brief_marks_hot_payment_signal():
 
     state = DialogState(
         user_id="hot-1",
-        funnel="tours",
+        funnel="admission",
         stage="qualification",
         history=[{"role": "user", "content": "можете бронировать, готов оплатить"}],
     )
@@ -473,19 +473,19 @@ def test_manager_brief_marks_hot_payment_signal():
 # ---------------- Wave 1: логин, claim+аудит, исход ----------------
 def test_admin_requires_login():
     client = TestClient(main.app, base_url="https://testserver")       # Secure-cookie сессии
-    assert client.get("/admin/board/visa").status_code == 401          # без сессии
+    assert client.get("/admin/board/admission").status_code == 401          # без сессии
     bad = client.post("/admin/login", data={"login": "admin", "password": "wrong"})
     assert bad.status_code == 401
     ok = client.post("/admin/login", data={"login": "admin", "password": "frunze"})
     assert ok.status_code == 200
-    assert client.get("/admin/board/visa").status_code == 200          # после логина
+    assert client.get("/admin/board/admission").status_code == 200          # после логина
 
 
 def test_takeover_assigns_and_audits():
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_message("u-claim-1", "client", "привет", channel="whatsapp", bot_id="getvisa"))
-    asyncio.run(store.update_meta("u-claim-1", funnel="visa"))
+    asyncio.run(store.add_message("u-claim-1", "client", "привет", channel="whatsapp", bot_id="college_2"))
+    asyncio.run(store.update_meta("u-claim-1", funnel="admission"))
 
     client = _auth_client()
     resp = client.post("/admin/conversation/u-claim-1/takeover")
@@ -502,7 +502,7 @@ def test_set_outcome_button():
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("u-out-1", "client", "оплатил", channel="whatsapp"))
-    asyncio.run(store.update_meta("u-out-1", funnel="tours"))
+    asyncio.run(store.update_meta("u-out-1", funnel="admission"))
 
     client = _auth_client()
     resp = client.post("/admin/conversation/u-out-1/outcome", data={"outcome": "won"})
@@ -515,7 +515,7 @@ def test_busy_warning_for_other_manager():
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("u-busy-1", "client", "вопрос", channel="whatsapp"))
-    asyncio.run(store.update_meta("u-busy-1", funnel="visa", assigned_to="medina"))
+    asyncio.run(store.update_meta("u-busy-1", funnel="admission", assigned_to="medina"))
 
     client = _auth_client()  # вошли как admin
     resp = client.get("/admin/conversation/u-busy-1")
@@ -533,7 +533,7 @@ def test_outcome_manual_sticky_over_auto():
         sm = async_sessionmaker(engine, expire_on_commit=False)
         store = PostgresConversationStore(sessionmaker=sm)
         await store.add_message("u-w", "client", "оплатил", channel="whatsapp")
-        await store.update_meta("u-w", funnel="tours", outcome="won")     # менеджер отметил
+        await store.update_meta("u-w", funnel="admission", outcome="won")     # менеджер отметил
         await store.update_meta("u-w", stage="manager", outcome="manager")  # авто из стадии
         conv = await store.get("u-w")
         assert conv.outcome == "won"   # ручной финал устоял
@@ -548,11 +548,11 @@ def test_compute_analytics_basic():
 
     t0 = datetime(2026, 6, 24, 10, 0, tzinfo=timezone.utc)
     # Диалог 1: только бот (contained), оплатил.
-    c1 = ConversationView(user_id="a", funnel="visa", stage="office", outcome="won",
+    c1 = ConversationView(user_id="a", funnel="admission", stage="office", outcome="won",
                           messages=[MessageView("client", "привет", t0),
                                     MessageView("bot", "здравствуйте", t0 + timedelta(minutes=1))])
     # Диалог 2: подключался менеджер, ответил через 5 мин.
-    c2 = ConversationView(user_id="b", funnel="tours", stage="manager", outcome="manager",
+    c2 = ConversationView(user_id="b", funnel="admission", stage="manager", outcome="manager",
                           intercepted=True, escalation_reason="Готов оплатить",
                           messages=[MessageView("client", "вопрос", t0),
                                     MessageView("manager", "отвечаю", t0 + timedelta(minutes=5))])
@@ -569,12 +569,12 @@ def test_analytics_endpoint_renders():
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("u-an-1", "client", "привет", channel="whatsapp"))
-    asyncio.run(store.update_meta("u-an-1", funnel="visa", stage="office", outcome="won"))
+    asyncio.run(store.update_meta("u-an-1", funnel="admission", stage="office", outcome="won"))
     client = _auth_client()
     resp = client.get("/admin/analytics")
     assert resp.status_code == 200
     assert "Containment" in resp.text
-    assert "Оплатили" in resp.text
+    assert "Поступают" in resp.text
 
 
 def test_analytics_period_and_by_manager():
@@ -582,7 +582,7 @@ def test_analytics_period_and_by_manager():
     _clear_memory()
     store = panel_store.get_conversation_store()
     asyncio.run(store.add_message("u-an-2", "client", "привет", channel="whatsapp"))
-    asyncio.run(store.update_meta("u-an-2", funnel="tours", stage="manager",
+    asyncio.run(store.update_meta("u-an-2", funnel="admission", stage="manager",
                                   outcome="won", assigned_to="sezim"))
     client = _auth_client()
     resp = client.get("/admin/analytics?period=7d")
@@ -595,10 +595,10 @@ def test_inbox_lists_waiting_across_funnels():
     """Инбокс показывает ждущих ответа клиентов из разных воронок в одном списке."""
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_message("getvisa:996700111", "client", "нужна виза", channel="whatsapp"))
-    asyncio.run(store.update_meta("getvisa:996700111", funnel="visa", stage="qualification"))
-    asyncio.run(store.add_message("frunze:996700222", "client", "хочу тур", channel="whatsapp"))
-    asyncio.run(store.update_meta("frunze:996700222", funnel="tours", stage="qualification"))
+    asyncio.run(store.add_message("college_2:996700111", "client", "нужна поступление", channel="whatsapp"))
+    asyncio.run(store.update_meta("college_2:996700111", funnel="admission", stage="qualification"))
+    asyncio.run(store.add_message("frunze:996700222", "client", "хочу поступление", channel="whatsapp"))
+    asyncio.run(store.update_meta("frunze:996700222", funnel="admission", stage="qualification"))
     client = _auth_client()
     resp = client.get("/admin/inbox")
     assert resp.status_code == 200
@@ -609,8 +609,8 @@ def test_inbox_lists_waiting_across_funnels():
 def test_search_finds_by_phone_and_empty_returns_inbox():
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_message("getvisa:996700333", "client", "вопрос", channel="whatsapp"))
-    asyncio.run(store.update_meta("getvisa:996700333", funnel="visa", stage="qualification"))
+    asyncio.run(store.add_message("college_2:996700333", "client", "вопрос", channel="whatsapp"))
+    asyncio.run(store.update_meta("college_2:996700333", funnel="admission", stage="qualification"))
     client = _auth_client()
     hit = client.get("/admin/search", params={"q": "0333"})
     assert hit.status_code == 200 and "996700333" in hit.text and "Поиск" in hit.text
@@ -624,9 +624,9 @@ def test_manager_can_move_card_stage():
     """Drag-and-drop: ручной перенос карточки в другую колонку меняет стадию диалога."""
     _clear_memory()
     store = panel_store.get_conversation_store()
-    uid = "getvisa:996700555"
+    uid = "college_2:996700555"
     asyncio.run(store.add_message(uid, "client", "привет", channel="whatsapp"))
-    asyncio.run(store.update_meta(uid, funnel="visa", stage="qualification"))
+    asyncio.run(store.update_meta(uid, funnel="admission", stage="qualification"))
     client = _auth_client()
 
     r = client.post(f"/admin/conversation/{uid}/stage", data={"stage": "office"})
@@ -634,7 +634,7 @@ def test_manager_can_move_card_stage():
     assert asyncio.run(store.get(uid)).stage == "office"
 
     # Доска кладёт карточку в колонку office (стадия-ключ round-trip-ит в свою колонку).
-    board = client.get("/admin/board/visa")
+    board = client.get("/admin/board/admission")
     assert board.status_code == 200 and "996700555" in board.text
 
     # Неизвестная колонка отклоняется.
@@ -645,8 +645,8 @@ def test_manager_can_move_card_stage():
 def test_stats_endpoint_counts_waiting():
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_message("getvisa:996700444", "client", "жду", channel="whatsapp"))
-    asyncio.run(store.update_meta("getvisa:996700444", funnel="visa", stage="qualification"))
+    asyncio.run(store.add_message("college_2:996700444", "client", "жду", channel="whatsapp"))
+    asyncio.run(store.update_meta("college_2:996700444", funnel="admission", stage="qualification"))
     client = _auth_client()
     resp = client.get("/admin/stats")
     assert resp.status_code == 200
@@ -688,20 +688,20 @@ def test_per_bot_toggle_sets_flag_and_orchestrator_uses_it():
     asyncio.run(flags.set_flag("bots_enabled", False))
     client = _auth_client()
 
-    resp = client.post("/admin/bots/frunze_tours/toggle", data={"on": "1"})
+    resp = client.post("/admin/bots/college_1/toggle", data={"on": "1"})
 
     assert resp.status_code == 200
-    assert "frunze_tours" in resp.text
-    assert asyncio.run(flags.get_flag("bots_enabled:frunze_tours", False)) is True
+    assert "college_1" in resp.text
+    assert asyncio.run(flags.get_flag("bots_enabled:college_1", False)) is True
     assert asyncio.run(Orchestrator(
         channel=_FakeChannel(),
-        bot=BotConfig(id="frunze_tours", scenario="tours"),
+        bot=BotConfig(id="college_1", scenario="admission"),
     )._bots_on()) is True
     assert asyncio.run(Orchestrator(
         channel=_FakeChannel(),
-        bot=BotConfig(id="getvisa", scenario="visa"),
+        bot=BotConfig(id="college_2", scenario="admission"),
     )._bots_on()) is False
-    assert any(a["action"] == "flag" and "bots_enabled:frunze_tours=on" in a["detail"]
+    assert any(a["action"] == "flag" and "bots_enabled:college_1=on" in a["detail"]
                for a in panel_store._memory_store._audit)
 
     assert client.post("/admin/bots/nope/toggle", data={"on": "1"}).status_code == 404
@@ -710,7 +710,7 @@ def test_per_bot_toggle_sets_flag_and_orchestrator_uses_it():
 def test_system_and_audit_pages():
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_audit("admin", "takeover", "getvisa:1", "перехват"))
+    asyncio.run(store.add_audit("admin", "takeover", "college_2:1", "перехват"))
     client = _auth_client()
     sysr = client.get("/admin/system")
     assert sysr.status_code == 200 and "Статус системы" in sysr.text
@@ -722,27 +722,27 @@ def test_system_and_audit_pages():
 
 
 def test_conversations_separated_by_bot(monkeypatch):
-    """Один номер у тур-бота и виза-бота = ДВА отдельных диалога (ключ bot_id:номер)."""
+    """Один номер у поступление-бота и поступление-бота = ДВА отдельных диалога (ключ bot_id:номер)."""
     _clear_memory()
     monkeypatch.setattr("app.agent.llm.settings.openrouter_api_key", "")
     from app.core.state import get_state_store
     store = panel_store.get_conversation_store()
     phone = "996555000111"
-    tours = Orchestrator(channel=_FakeChannel(), bot=BotConfig(id="frunze_tours", scenario="tours"))
-    visa = Orchestrator(channel=_FakeChannel(), bot=BotConfig(id="getvisa", scenario="visa"))
-    asyncio.run(tours.handle(_msg(phone, "хочу тур")))
-    asyncio.run(visa.handle(_msg(phone, "хочу визу")))
+    bot1 = Orchestrator(channel=_FakeChannel(), bot=BotConfig(id="college_1", scenario="admission"))
+    bot2 = Orchestrator(channel=_FakeChannel(), bot=BotConfig(id="college_2", scenario="admission"))
+    asyncio.run(bot1.handle(_msg(phone, "хочу поступление")))
+    asyncio.run(bot2.handle(_msg(phone, "хочу поступление")))
 
-    t = asyncio.run(store.get(f"frunze_tours:{phone}"))
-    v = asyncio.run(store.get(f"getvisa:{phone}"))
+    t = asyncio.run(store.get(f"college_1:{phone}"))
+    v = asyncio.run(store.get(f"college_2:{phone}"))
     assert t is not None and v is not None
-    assert t.funnel == "tours" and v.funnel == "visa"   # воронки не смешались
+    assert t.funnel == "admission" and v.funnel == "admission"   # диалоги не смешались
     assert t.phone == phone and v.phone == phone        # показываем один номер
 
     # Перехват одного бота НЕ глушит другого (раздельное состояние).
     from app.admin.router import _set_intercept
-    asyncio.run(_set_intercept(f"frunze_tours:{phone}", True))
-    assert asyncio.run(get_state_store().load(f"getvisa:{phone}")).intercepted is False
+    asyncio.run(_set_intercept(f"college_1:{phone}", True))
+    assert asyncio.run(get_state_store().load(f"college_2:{phone}")).intercepted is False
 
 
 # ---------------- быстрый вход для демо ----------------
@@ -759,4 +759,5 @@ def test_demo_login_gated_by_setting(monkeypatch):
     assert "Быстрый вход" in page and "Войти как" in page
     r = client.post("/admin/login/demo", data={"login": "admin"})
     assert r.status_code == 200  # редирект на /admin → 200
-    assert client.get("/admin/board/visa").status_code == 200  # сессия установлена
+    assert client.get("/admin/board/admission").status_code == 200  # сессия установлена
+
