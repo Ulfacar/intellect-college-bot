@@ -39,13 +39,14 @@ _PASSING_SCORE = re.compile(
 _DURATION_3Y = re.compile(r"\b(3|три|үч)\s*(год|года|жыл)", re.IGNORECASE)
 
 
-def strip_markdown(text: str) -> str:
+def strip_markdown(text: str, *, normalize_dashes: bool = True) -> str:
     text = _BOLD.sub(r"\1", text)
     text = _UNDERSCORE.sub(r"\1", text)
     text = _HEADER.sub("", text)
     text = _BULLET.sub("", text)
     text = _MULTINL.sub("\n\n", text)
-    text = _SPACED_DASH.sub(". ", text)
+    if normalize_dashes:
+        text = _SPACED_DASH.sub(". ", text)
     return text.strip()
 
 
@@ -61,19 +62,20 @@ def _price_numbers(text: str) -> list[int]:
 def validate_reply(text: str, funnel: str | None) -> tuple[str, list[str]]:
     violations: list[str] = []
     clean = strip_markdown(text)
+    detection = strip_markdown(text, normalize_dashes=False)
     if clean != text.strip():
         violations.append("markdown")
 
     if funnel == "admission":
-        if _ADMISSION_GUARANTEE.search(clean):
+        if _ADMISSION_GUARANTEE.search(detection):
             violations.append("admission_guarantee")
-        if any(n >= 100 and n != 6500 for n in _price_numbers(clean)):
+        if any(n >= 100 and n != 6500 for n in _price_numbers(detection)):
             violations.append("admission_price_mismatch")
-        if _DISCOUNT_AMOUNT.search(clean):
+        if _DISCOUNT_AMOUNT.search(detection):
             violations.append("admission_discount_amount")
-        if _PASSING_SCORE.search(clean):
+        if _PASSING_SCORE.search(detection):
             violations.append("admission_passing_score")
-        if _DURATION_3Y.search(clean):
+        if _DURATION_3Y.search(detection):
             violations.append("admission_duration_claim")
 
     if len(clean) > MAX_LEN:

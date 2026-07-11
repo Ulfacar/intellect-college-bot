@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 
 from app.core.branding import COLLEGE_ADDRESS
 from app.core.faq import FaqEntryView, get_faq_store, match_faq, normalize_text, reset, seed_defaults

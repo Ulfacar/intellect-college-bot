@@ -7,7 +7,7 @@ from app.core.state import DialogState
 from app.funnels.base import collect_qualification
 from app.integrations.crm import get_crm
 
-REQUIRED_FIELDS = ["name", "grade_base", "direction"]
+REQUIRED_FIELDS = ["grade_base", "name", "direction"]
 
 
 class AdmissionFunnel:

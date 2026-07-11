@@ -94,8 +94,8 @@ def load_scenarios(path: Path) -> list[dict[str, Any]]:
 
 
 async def run_dialog(scn: dict[str, Any], run_no: int, out_dir: Path) -> RunResult:
-    bot_name = scn["bot"]
-    bot = BotConfig(id=f"sim_{bot_name}", scenario=bot_name)
+    bot_name = scn.get("bot", "admission")
+    bot = BotConfig(id=f"sim_{bot_name}", scenario="admission")
     user_id = f"sim-{scn['id']}-{run_no}-{datetime.now(timezone.utc).timestamp()}"
     channel = CollectChannel()
     orch = Orchestrator(channel=channel, bot=bot)
@@ -134,8 +134,7 @@ def rule_judge(scn: dict[str, Any], transcript: list[dict[str, str]], state: Any
     """Двухуровневые правила.
 
     HARD (блокируют pass) — только механика, где regex не ошибётся: пустой/ошибочный
-    ответ, тур-цена вообще без дисклеймера. SOFT (advisory) — семантика (гарантия визы,
-    качество отказа, сила квалификации): regex тут даёт ложные срабатывания, поэтому
+    ответ. SOFT (advisory) — семантика качества квалификации/эскалации, поэтому
     решение отдаём LLM-судье. Когда судья выключен — soft тоже учитывается как провал.
     """
     text = bot_text(transcript)
@@ -149,30 +148,20 @@ def rule_judge(scn: dict[str, Any], transcript: list[dict[str, str]], state: Any
         hard.append("bot_failed: fallback/error-like reply")
 
     for reply in [item["text"] for item in transcript if item["sender"] == "bot"]:
-        _, violations = validator.validate_reply(reply, scn.get("bot"))
+        _, violations = validator.validate_reply(reply, "admission")
         for violation in violations:
-            if violation == "possible_visa_guarantee":
-                # «гарантируем сопровождение/вторую попытку» ≠ гарантия визы → не блокируем,
-                # отдаём смысловую оценку LLM-судье.
-                soft.append("soft: validator flagged 'гаранти*' (verify via LLM judge — часто это гарантия услуги, не визы)")
-            elif violation == "price_in_no_price_funnel":
-                soft.append("soft: price in no-price funnel")
-
-    if scn.get("bot") == "tours":
-        has_price = bool(validator._PRICE.search(text))  # noqa: SLF001 - intentional reuse of guardrail regex
-        has_disclaimer = bool(validator._DISCLAIMER_MARK.search(text))  # noqa: SLF001
-        if has_price and not has_disclaimer:
-            hard.append("rule_failed: tour price without disclaimer")
-
-    if scn.get("bot") == "visa" and re.search(r"гарант|100\s?%", client_text, re.I):
-        if not re.search(r"не\s+\w*гарант|гаранти[ийю]\s+нет|гарантию\s+дать\s+(не|невозможно)", text, re.I):
-            soft.append("soft: visa guarantee denial not matched by regex (verify via LLM judge)")
+            if violation in {
+                "admission_guarantee",
+                "admission_price_mismatch",
+                "admission_discount_amount",
+                "admission_passing_score",
+                "admission_duration_claim",
+            }:
+                soft.append(f"soft: validator flagged {violation}")
 
     qual = getattr(state, "qualification", {}) or {}
-    if len(scn.get("messages", [])) >= 3 and scn.get("bot") == "tours" and len(qual) < 2:
-        soft.append("soft: weak tour qualification state")
-    if len(scn.get("messages", [])) >= 4 and scn.get("bot") == "visa" and len(qual) < 2:
-        soft.append("soft: weak visa qualification state")
+    if len(scn.get("messages", [])) >= 3 and scn.get("bot") == "admission" and len(qual) < 2:
+        soft.append("soft: weak admission qualification state")
 
     score = max(0, 10 - len(hard) * 3 - len(soft))
     return JudgeResult(passed=not hard, score=score, failures=hard, soft_failures=soft, source="rule")
@@ -190,7 +179,7 @@ async def llm_judge(scn: dict[str, Any], run: RunResult, judge_model: str) -> Ju
 
     transcript = format_transcript(run.transcript)
     system = (
-        "Ты строгий QA-судья для AI-продавца турагентства Frunze Travel/GetVisa. "
+        "Ты строгий QA-судья для AI-бота приёмной комиссии Intellect College. "
         "Оценивай только по фактам диалога и чек-листу. Верни только JSON без markdown. "
         "Схема: {\"passed\": boolean, \"score\": 0-10, \"failures\": [string], "
         "\"recommendation\": string}. Если бот нарушил must_not, passed=false."
@@ -316,7 +305,6 @@ def write_report(out_dir: Path, scenarios: list[dict[str, Any]], results: dict[s
         f"Judge model: `{args.judge_model}`",
         f"LLM judge: `{not args.no_llm_judge}`",
         f"OpenRouter key present: `{bool(settings.openrouter_api_key)}`",
-        f"TourVisor configured: `{bool(settings.tourvisor_login and settings.tourvisor_pass)}`",
         "",
         f"Stable green: {stable}/{len(scenarios)}",
         f"Flaky: {flaky}/{len(scenarios)}",
@@ -363,11 +351,11 @@ def format_report_item(status: str, passed_runs: int, total: int, avg: float, sc
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Run Frunze Travel bot quality scenarios.")
+    parser = argparse.ArgumentParser(description="Run Intellect College bot quality scenarios.")
     parser.add_argument("--scenarios", default=str(DEFAULT_SCENARIOS), help="Scenario JSON file or directory.")
     parser.add_argument("--repeats", type=int, default=3, help="Runs per scenario.")
     parser.add_argument("--only", help="Run one scenario id.")
-    parser.add_argument("--bot", choices=["tours", "visa"], help="Filter by bot/funnel.")
+    parser.add_argument("--bot", choices=["admission"], help="Filter by bot/funnel.")
     parser.add_argument("--no-llm-judge", action="store_true", help="Disable LLM judge and use rule-based checks only.")
     parser.add_argument("--judge-model", default=settings.llm_model_cheap,
                         help="LLM judge model. Example: anthropic/claude-sonnet-4.6")

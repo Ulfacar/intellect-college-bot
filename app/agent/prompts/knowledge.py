@@ -5,11 +5,8 @@ Facts here are the whitelist. Anything outside this block must be escalated.
 from app.core.branding import (
     ADMISSION_DEADLINE,
     COLLEGE_ADDRESS,
-    COLLEGE_WORKING_HOURS,
-    DIRECTIONS,
     DOCUMENTS,
     TEST_FACTS,
-    TUITION_PRICE,
 )
 
 DIRECTIONS_TEXT = (
@@ -42,7 +39,7 @@ ADMISSION_FAQ = f"""\
 Дедлайн приёма: {ADMISSION_DEADLINE}.
 Приём после 9 и после 11 класса есть.
 Адрес: {COLLEGE_ADDRESS}.
-Часы работы приёмной: {COLLEGE_WORKING_HOURS}; точные часы не называй как факт.
+Точные часы работы приёмной не подтверждены — не называй их; при вопросе о часах работы передай менеджеру.
 
 Поступление в вуз США: можно сказать только безопасно: у колледжа есть возможность
 поступления в вуз США, условия индивидуальные, подробно расскажет менеджер. Никаких гарантий.

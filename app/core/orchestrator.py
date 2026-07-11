@@ -21,11 +21,6 @@ from app.integrations.panel.store import get_conversation_store
 
 log = logging.getLogger("orchestrator")
 
-GREETING = (
-    "Здравствуйте! Это Айдана, приёмная комиссия Intellect IT & Business College 😊\n"
-    "Подскажите, вы рассматриваете поступление после 9 или после 11 класса?"
-)
-
 # Авто-исход диалога из стадии (ручные won/lost не перетираются — см. store).
 _OFFICE_STAGES = {"office", "office_consultation", "test_invite"}
 _MANAGER_STAGES = {"manager", "manager_handoff"}
@@ -192,10 +187,6 @@ class Orchestrator:
                 state.funnel = self.bot.scenario  # сценарий бота фиксирует воронку
             else:
                 detected = detect_funnel(msg.text)
-                if detected is None:
-                    await self._reply(msg, GREETING)
-                    await store.save(state)
-                    return
                 state.funnel = detected
 
         faq_reply = await self._maybe_faq_reply(msg, state, store)

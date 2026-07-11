@@ -1,4 +1,4 @@
-﻿"""Тесты админ-панели: лог диалогов (store), логирование оркестратором,
+"""Тесты админ-панели: лог диалогов (store), логирование оркестратором,
 перехват (бот замолкает), эндпоинты доски + авторизация.
 """
 import asyncio
@@ -43,10 +43,10 @@ def _msg(user_id, text):
 
 
 def _auth_client():
-    """TestClient с залогиненным менеджером (дефолт admin/frunze) — cookie-сессия.
+    """TestClient с залогиненным менеджером (дефолт admin/change-me) — cookie-сессия.
     base_url=https — cookie сессии Secure (https_only), иначе по http не сохранится."""
     client = TestClient(main.app, base_url="https://testserver")
-    r = client.post("/admin/login", data={"login": "admin", "password": "frunze"})
+    r = client.post("/admin/login", data={"login": "admin", "password": "change-me"})
     assert r.status_code == 200  # редирект на /admin отрабатывает, сессия установлена
     return client
 
@@ -87,7 +87,7 @@ def test_archived_conversation_hidden_from_lists():
         sm = async_sessionmaker(engine, expire_on_commit=False)
         store = PostgresConversationStore(sessionmaker=sm)
 
-        await store.add_message("u-active", "client", "нужна поступление", channel="whatsapp")
+        await store.add_message("u-active", "client", "хочу поступить", channel="whatsapp")
         await store.update_meta("u-active", funnel="admission")
         await store.add_message("u-archived", "client", "https://instagram.com/ad", channel="whatsapp")
         await store.update_meta("u-archived", funnel="admission")
@@ -150,7 +150,7 @@ def test_postgres_add_message_unarchives_existing_dialog():
 def test_memory_archived_conversation_hidden_from_lists():
     async def scenario():
         store = panel_store.MemoryConversationStore()
-        await store.add_message("u-active", "client", "нужна поступление", channel="whatsapp")
+        await store.add_message("u-active", "client", "хочу поступить", channel="whatsapp")
         await store.update_meta("u-active", funnel="admission")
         await store.add_message("u-archived", "client", "https://instagram.com/ad", channel="whatsapp")
         await store.update_meta("u-archived", funnel="admission")
@@ -258,7 +258,7 @@ def test_board_routes_silent_leads_to_computed_column():
         bot_id="college_1",
         chat_id="silent-1@c.us",
         last_sender="client",
-        last_text="а что по поступлениеу?",
+        last_text="а что по поступлению?",
         last_message_at=now - timedelta(hours=30),
     )
 
@@ -476,7 +476,7 @@ def test_admin_requires_login():
     assert client.get("/admin/board/admission").status_code == 401          # без сессии
     bad = client.post("/admin/login", data={"login": "admin", "password": "wrong"})
     assert bad.status_code == 401
-    ok = client.post("/admin/login", data={"login": "admin", "password": "frunze"})
+    ok = client.post("/admin/login", data={"login": "admin", "password": "change-me"})
     assert ok.status_code == 200
     assert client.get("/admin/board/admission").status_code == 200          # после логина
 
@@ -595,10 +595,10 @@ def test_inbox_lists_waiting_across_funnels():
     """Инбокс показывает ждущих ответа клиентов из разных воронок в одном списке."""
     _clear_memory()
     store = panel_store.get_conversation_store()
-    asyncio.run(store.add_message("college_2:996700111", "client", "нужна поступление", channel="whatsapp"))
+    asyncio.run(store.add_message("college_2:996700111", "client", "хочу поступить", channel="whatsapp"))
     asyncio.run(store.update_meta("college_2:996700111", funnel="admission", stage="qualification"))
-    asyncio.run(store.add_message("frunze:996700222", "client", "хочу поступление", channel="whatsapp"))
-    asyncio.run(store.update_meta("frunze:996700222", funnel="admission", stage="qualification"))
+    asyncio.run(store.add_message("college_3:996700222", "client", "хочу поступить", channel="whatsapp"))
+    asyncio.run(store.update_meta("college_3:996700222", funnel="admission", stage="qualification"))
     client = _auth_client()
     resp = client.get("/admin/inbox")
     assert resp.status_code == 200

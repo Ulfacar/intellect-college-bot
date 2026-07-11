@@ -1,4 +1,4 @@
-﻿"""Тестовые Telegram-боты (песочница): маршрут /webhook/telegram/<id> и жёсткий сценарий."""
+"""Тестовые Telegram-боты (песочница): маршрут /webhook/telegram/<id> и жёсткий сценарий."""
 import asyncio
 
 from app.config import BotConfig, TelegramBotConfig

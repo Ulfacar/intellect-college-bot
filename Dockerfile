@@ -1,4 +1,4 @@
-# Frunze Travel Bot — образ приложения (FastAPI/uvicorn)
+# Intellect College Bot — образ приложения (FastAPI/uvicorn)
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \

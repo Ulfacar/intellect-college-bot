@@ -1,4 +1,4 @@
-﻿"""End-to-end тест вебхука Bitrix: form-событие → роутинг по BOT_ID → parse →
+"""End-to-end тест вебхука Bitrix: form-событие → роутинг по BOT_ID → parse →
 оркестратор → ответ в канал. Воронку подменяем FakeFunnel (детерминизм, без LLM).
 """
 from fastapi.testclient import TestClient

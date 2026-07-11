@@ -1,4 +1,4 @@
-﻿"""Тесты PostgresCrm на in-memory SQLite (без сетевого Postgres).
+"""Тесты PostgresCrm на in-memory SQLite (без сетевого Postgres).
 
 Проверяем контракт CRMPort: создание сделки, движение по стадии, заметки —
 всё с реальной БД (async SQLAlchemy), но в памяти и переживая «сессии».

@@ -1,12 +1,12 @@
-"""Локальный запуск бота в Telegram через long-polling (для демо, без вебхука/ngrok).
+"""Локальный запуск admission-бота в Telegram через long-polling (для демо, без вебхука/ngrok).
 
 Запуск:
     pip install -r requirements.txt
-    # заполни .env: TELEGRAM_BOT_TOKEN и (для AI-диалога) ANTHROPIC_API_KEY
+    # заполни .env: TELEGRAM_BOT_TOKEN и (для AI-диалога) OPENROUTER_API_KEY
     python run_polling.py
 
-Без ANTHROPIC_API_KEY воронка «Туры» работает в детерминированном режиме (вопрос-ответ).
-С ключом — живой AI-диалог через Claude. TourVisor пока в демо-режиме.
+Без OPENROUTER_API_KEY admission-сценарий работает в детерминированном режиме (вопрос-ответ).
+С ключом — живой AI-диалог через OpenRouter.
 """
 from __future__ import annotations
 
@@ -18,12 +18,16 @@ from aiogram.types import Message as TgMessage
 
 from app.channels.base import Message
 from app.channels.telegram import TelegramAdapter
+from app.config import BotConfig
 from app.core.orchestrator import Orchestrator
 
 logging.basicConfig(level=logging.INFO)
 
 adapter = TelegramAdapter()
-orchestrator = Orchestrator(channel=adapter)
+orchestrator = Orchestrator(
+    channel=adapter,
+    bot=BotConfig(id="telegram_admission", scenario="admission", title="Intellect College Telegram"),
+)
 dp = Dispatcher()
 
 

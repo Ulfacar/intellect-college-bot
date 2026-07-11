@@ -1,4 +1,4 @@
-﻿"""Тесты go-live hardening: проверка вебхуков, rate-limit логина, graceful-фолбэк LLM."""
+"""Тесты go-live hardening: проверка вебхуков, rate-limit логина, graceful-фолбэк LLM."""
 import asyncio
 
 from fastapi.testclient import TestClient

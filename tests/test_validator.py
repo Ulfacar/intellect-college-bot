@@ -1,4 +1,4 @@
-﻿from app.agent.validator import strip_markdown, validate_reply
+from app.agent.validator import strip_markdown, validate_reply
 
 
 def test_strip_markdown_removes_formatting():
@@ -48,8 +48,18 @@ def test_discount_percent_flagged():
     assert "admission_discount_amount" in violations
 
 
+def test_discount_percent_with_dash_flagged():
+    _, violations = validate_reply("Скидка — 20%", "admission")
+    assert "admission_discount_amount" in violations
+
+
 def test_passing_score_flagged():
     _, violations = validate_reply("Проходной балл 90.", "admission")
+    assert "admission_passing_score" in violations
+
+
+def test_passing_score_with_dash_flagged():
+    _, violations = validate_reply("Проходной балл — 90", "admission")
     assert "admission_passing_score" in violations
 
 

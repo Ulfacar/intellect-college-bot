@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "frunze")
+ADMIN_PW = os.environ.get("ADMIN_PASSWORD", "change-me")
 
 _jar = http.cookiejar.CookieJar()
 _opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_jar))
@@ -59,14 +59,14 @@ def main() -> int:
     code, _ = _req("POST", "/webhook/wappi", json_body=dlv)
     check(code == 200, "POST /webhook/wappi (delivery) → 200")
 
-    code, _ = _req("GET", "/admin/board/visa")
-    check(code == 401, "GET /admin/board/visa без логина → 401")
+    code, _ = _req("GET", "/admin/board/admission")
+    check(code == 401, "GET /admin/board/admission без логина → 401")
 
     # Логин формой — заодно проверяет, что python-multipart есть в образе.
     code, _ = _req("POST", "/admin/login", data={"login": "admin", "password": ADMIN_PW})
     check(code == 200, "POST /admin/login (форма) → 200")
-    code, body = _req("GET", "/admin/board/visa")
-    check(code == 200, "GET /admin/board/visa после логина → 200")
+    code, body = _req("GET", "/admin/board/admission")
+    check(code == 200, "GET /admin/board/admission после логина → 200")
     code, _ = _req("GET", "/admin/analytics")
     check(code == 200, "GET /admin/analytics → 200")
 

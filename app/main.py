@@ -98,14 +98,14 @@ if settings.admin_enabled:
     from app.admin.router import router as admin_router
     app.include_router(admin_router)
 
-# Дев-демо: одиночный бот в Telegram (keyword-детект воронки). Поднимается только
-# при заданном токене — прод работает через Bitrix и Telegram-токена не требует.
+# Дев-демо: одиночный admission-бот в Telegram. Поднимается только при заданном токене —
+# продовый WhatsApp/Wappi-канал Telegram-токена не требует.
 _telegram = TelegramAdapter() if settings.telegram_bot_token else None
 _telegram_orchestrator = Orchestrator(channel=_telegram) if _telegram else None
 
 # Тестовые Telegram-боты (песочница): по оркестратору на каждого, со своим токеном и
-# ЖЁСТКИМ сценарием (как WhatsApp-боты). Маршрут — /webhook/telegram/<id>. Ключ диалога
-# bot_id:user_id, поэтому туры и визы в Telegram не пересекаются.
+# ЖЁСТКИМ сценарием admission (как WhatsApp-боты). Маршрут — /webhook/telegram/<id>.
+# Ключ диалога bot_id:user_id, поэтому тестовые боты не пересекаются.
 _telegram_test: dict[str, tuple[TelegramAdapter, Orchestrator]] = {}
 for _tb in settings.telegram_bots:
     _tg_bot = BotConfig(id=_tb.id, scenario=_tb.scenario, title=_tb.title)
@@ -148,7 +148,7 @@ async def telegram_webhook(request: Request):
 
 @app.post("/webhook/telegram/{bot_id}")
 async def telegram_test_webhook(bot_id: str, request: Request):
-    """Тестовый Telegram-бот (песочница): свой токен + жёсткий сценарий (туры/визы)."""
+    """Тестовый Telegram-бот (песочница): свой токен + жёсткий admission-сценарий."""
     if not _verify_webhook(request, telegram=True):
         return JSONResponse({"ok": False, "reason": "forbidden"}, status_code=403)
     entry = _telegram_test.get(bot_id)

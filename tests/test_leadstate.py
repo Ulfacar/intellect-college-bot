@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.leadstate import is_noise, is_silent
 from app.integrations.panel.store import ConversationView, MessageView

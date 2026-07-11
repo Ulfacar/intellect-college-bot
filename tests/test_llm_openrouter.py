@@ -1,4 +1,4 @@
-﻿from app.agent.llm import _from_openai_response, _to_openai_messages, _to_openai_tools, llm_enabled
+from app.agent.llm import _from_openai_response, _to_openai_messages, _to_openai_tools, llm_enabled
 
 
 def test_openrouter_tool_schema_conversion():

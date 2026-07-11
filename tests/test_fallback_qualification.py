@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 
 from app.channels.base import Message
 from app.core.state import DialogState
@@ -26,7 +26,7 @@ def test_admission_fallback_runs_to_completion(monkeypatch):
     state = DialogState(user_id="offline-1", funnel="admission")
 
     replies = []
-    for text in ["хочу поступать", "Айбек", "9", "Программная инженерия и ИИ"]:
+    for text in ["хочу поступать", "9", "Айбек", "Программная инженерия и ИИ"]:
         msg = Message(channel="console", user_id="offline-1", chat_id="offline-1", text=text)
         replies.append(asyncio.run(funnel.handle(msg, state)))
 

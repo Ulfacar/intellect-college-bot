@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 
 from app.channels.base import Message
 from app.channels.bitrix_openlines import bot_id_from_event

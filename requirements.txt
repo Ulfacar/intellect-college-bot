@@ -1,4 +1,4 @@
-# Frunze Travel Bot — зависимости (MVP)
+# Intellect College Bot — зависимости (MVP)
 fastapi==0.115.*
 uvicorn[standard]==0.30.*
 aiogram==3.*

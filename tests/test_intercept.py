@@ -1,4 +1,4 @@
-﻿"""Нативный перехват: когда менеджер взял диалог (state.intercepted=True), бот молчит."""
+"""Нативный перехват: когда менеджер взял диалог (state.intercepted=True), бот молчит."""
 import asyncio
 from unittest.mock import AsyncMock
 

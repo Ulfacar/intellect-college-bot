@@ -1,7 +1,7 @@
 # Оверлей для self-hosted VPS, где УЖЕ есть системный nginx + certbot на портах 80/443
 # (сервер общий, на нём живут другие проекты). Наш стек не трогает 80/443 —
 # приложение слушает только localhost:8000, а host-nginx проксирует на него
-# frunzetravel.kg и держит TLS (Let's Encrypt через certbot).
+# college.example.com и держит TLS (Let's Encrypt через certbot).
 #
 # Запуск на сервере:
 #   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build

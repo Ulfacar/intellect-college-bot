@@ -1,7 +1,7 @@
-﻿"""Дебаунс входящих: быстрые реплики клиента склеиваются в один ход LLM.
+"""Дебаунс входящих: быстрые реплики клиента склеиваются в один ход LLM.
 
-При DEBOUNCE_SECONDS>0 несколько коротких сообщений подряд («Хочу в поступлениецию» / «2 взрослых» /
-«конец июля») должны собраться в один ход и дать ОДИН связный ответ (без задвоений), при этом
+При DEBOUNCE_SECONDS>0 несколько коротких сообщений подряд («Хочу поступить» / «после 9» /
+«интересует IT») должны собраться в один ход и дать ОДИН связный ответ (без задвоений), при этом
 каждое входящее логируется в панель сразу. При 0 — синхронное поведение как раньше.
 """
 import asyncio
@@ -61,7 +61,7 @@ def test_debounce_coalesces_rapid_messages(monkeypatch):
     orchestrator = Orchestrator(channel=ch)
 
     async def fire():
-        for t in ("Хочу в поступлениецию", "2 взрослых", "конец июля"):
+        for t in ("Хочу поступить", "после 9", "интересует IT"):
             await orchestrator.handle(
                 Message(channel="telegram", user_id="deb-user", chat_id="1", text=t))
         await asyncio.sleep(0.2)  # дать тихому окну истечь и флашу отработать
@@ -69,13 +69,13 @@ def test_debounce_coalesces_rapid_messages(monkeypatch):
     asyncio.run(fire())
 
     # Воронка вызвана РОВНО один раз — со склеенным текстом всех трёх реплик.
-    assert funnel.calls == ["Хочу в поступлениецию\n2 взрослых\nконец июля"]
+    assert funnel.calls == ["Хочу поступить\nпосле 9\nинтересует IT"]
     # Отправлен ОДИН ответ (без задвоений).
-    assert ch.sent == [("1", "ответ на: Хочу в поступлениецию\n2 взрослых\nконец июля")]
+    assert ch.sent == [("1", "ответ на: Хочу поступить\nпосле 9\nинтересует IT")]
     # Все три входящих залогированы в панель сразу.
     conv = asyncio.run(get_conversation_store().get("deb-user"))
     client_msgs = [m.text for m in conv.messages if m.sender == "client"]
-    assert client_msgs == ["Хочу в поступлениецию", "2 взрослых", "конец июля"]
+    assert client_msgs == ["Хочу поступить", "после 9", "интересует IT"]
 
 
 def test_debounce_off_is_inline(monkeypatch):

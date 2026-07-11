@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     panel_backend: Literal["memory", "postgres"] = "memory"
     admin_enabled: bool = True
     admin_user: str = "admin"
-    admin_password: str = "frunze"
+    admin_password: str = "change-me"
     managers: list[ManagerConfig] = []
     alert_whatsapp_to: str = ""
     alert_bot_id: str = ""

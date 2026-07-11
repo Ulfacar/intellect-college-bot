@@ -1,4 +1,4 @@
-﻿"""Тесты автодожима, watchdog-алертов и фонового планировщика."""
+"""Тесты автодожима, watchdog-алертов и фонового планировщика."""
 import asyncio
 from datetime import datetime, timedelta, timezone
 

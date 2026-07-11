@@ -15,12 +15,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import httpx
 
 from app.channels.base import Message
-from app.config import BotConfig, settings
+from app.config import BotConfig
 
 logger = logging.getLogger("channel.bitrix")
 
@@ -85,7 +86,7 @@ class BitrixOpenLinesAdapter:
 
     def __init__(self, bot: BotConfig | None = None, client: httpx.AsyncClient | None = None) -> None:
         self.bot = bot
-        self._base = getattr(settings, "bitrix24_webhook_url", "").rstrip("/")
+        self._base = os.environ.get("BITRIX24_WEBHOOK_URL", "").rstrip("/")
         self._client = client
 
     async def parse(self, raw: dict) -> Message:
@@ -117,7 +118,7 @@ class BitrixOpenLinesAdapter:
     async def send(self, chat_id: str, text: str, **kwargs) -> None:
         """Отправить ответ клиенту через imbot.message.add от имени бота."""
         if not self._base:
-            logger.warning("Bitrix send пропущен: не задан bitrix24_webhook_url")
+            logger.warning("Bitrix send пропущен: не задан BITRIX24_WEBHOOK_URL")
             return
         payload: dict[str, Any] = {"DIALOG_ID": chat_id, "MESSAGE": text}
         if self.bot and self.bot.bitrix_bot_id:

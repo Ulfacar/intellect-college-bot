@@ -1,4 +1,4 @@
-# Frunze Travel Bot — прод-стек: приложение + Postgres + Redis.
+# Intellect College Bot — прод-стек: приложение + Postgres + Redis.
 # Coolify даёт reverse-proxy + TLS поверх сервиса `app` (порт 8000), поэтому
 # nginx/Let's Encrypt здесь не нужны. Секреты — из .env (см. .env.example).
 services:
@@ -9,19 +9,17 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
-      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Frunze Travel Bot}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Intellect College Bot}
       LLM_MODEL_MAIN: ${LLM_MODEL_MAIN:-anthropic/claude-3.5-sonnet}
       LLM_MODEL_CHEAP: ${LLM_MODEL_CHEAP:-anthropic/claude-3-haiku}
       WAPPI_BASE_URL: ${WAPPI_BASE_URL:-https://wappi.pro}
       WAPPI_TOKEN: ${WAPPI_TOKEN:-}
       WAPPI_PROFILE_ID: ${WAPPI_PROFILE_ID:-}
-      BOTS: ${BOTS:-[{"id":"frunze_tours","scenario":"tours","title":"FrunzeTravel2","wappi_profile_id":"00000000-0000"},{"id":"getvisa","scenario":"visa","title":"GetVisa","wappi_profile_id":"00000000-0000"}]}
+      BOTS: ${BOTS:-[{"id":"college_1","scenario":"admission","title":"Intellect 1","wappi_profile_id":""},{"id":"college_2","scenario":"admission","title":"Intellect 2","wappi_profile_id":""},{"id":"college_3","scenario":"admission","title":"Intellect 3","wappi_profile_id":""}]}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOTS: ${TELEGRAM_BOTS:-[]}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
-      TOURVISOR_LOGIN: ${TOURVISOR_LOGIN:-}
-      TOURVISOR_PASS: ${TOURVISOR_PASS:-}
-      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/frunze
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/college
       REDIS_URL: redis://redis:6379/0
       CRM_BACKEND: ${CRM_BACKEND:-postgres}
       BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL:-}
@@ -33,7 +31,7 @@ services:
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       MANAGERS: ${MANAGERS:-[]}
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-frunze-session-secret}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-college-session-secret}
       DEMO_LOGIN: ${DEMO_LOGIN:-false}
     ports:
       - "8000:8000"
@@ -49,11 +47,11 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: frunze
+      POSTGRES_DB: college
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d frunze"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d college"]
       interval: 10s
       timeout: 5s
       retries: 5

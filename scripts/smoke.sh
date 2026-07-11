@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IMG=frunze-smoke
+IMG=college-smoke
 PORT=18077
 echo "== build =="
 docker build -t "$IMG" .

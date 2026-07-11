@@ -1,4 +1,4 @@
-﻿"""Тесты прямого WhatsApp-канала Wappi: parse/send, фильтр эхо, e2e webhook."""
+"""Тесты прямого WhatsApp-канала Wappi: parse/send, фильтр эхо, e2e webhook."""
 import asyncio
 import json
 
@@ -46,11 +46,11 @@ def test_is_incoming_filters_echo_and_status():
 
 # ---------------- parse ----------------
 def test_parse_text_message():
-    msg = asyncio.run(WappiAdapter().parse(_incoming("хочу поступление в поступлениецию")))
+    msg = asyncio.run(WappiAdapter().parse(_incoming("хочу поступить в колледж")))
     assert msg.channel == "whatsapp"
     assert msg.user_id == "996700123456"             # номер без @c.us
     assert msg.chat_id == "996700123456@c.us"        # отвечаем в этот chatId
-    assert msg.text == "хочу поступление в поступлениецию"
+    assert msg.text == "хочу поступить в колледж"
     assert msg.kind == "text"
 
 
