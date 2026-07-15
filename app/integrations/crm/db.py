@@ -309,6 +309,106 @@ class Outbox(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class FaqKbEntry(Base):
+    """Managed multilingual FAQ / knowledge-base entry (Increment 5 телеграм-пилота).
+
+    NEW, additive table — does NOT collide with the legacy `faq_entries`
+    (`FaqEntry` above, `app/core/faq.py`) which stays exactly as-is. See
+    `docs/faq-knowledge-base-spec.md` and `app/core/faq_kb.py` for the full
+    publication-lifecycle contract (draft/published/archived, versions, rollback).
+
+    Content fields on THIS row (`canonical_question`/`answer_ru`/`answer_ky`/
+    `category`/`priority`/`handoff_only`/`valid_from`/`valid_until`) are the
+    CURRENT, possibly-unpublished, editable values — the live bot only ever serves
+    the snapshot of the LATEST `faq_kb_versions` row with
+    `action IN ('published','restored')` (see `faq_kb.list_published_candidates`).
+    Editing this row does NOT change production until "Publish" is pressed again.
+
+    `enabled`/`publication_status`/`archived_at` are LIVE governance flags (immediate
+    effect, no publish cycle needed) — Disable/Enable/Archive act on them directly.
+    """
+
+    __tablename__ = "faq_kb_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_question: Mapped[str] = mapped_column(Text, default="")
+    answer_ru: Mapped[str] = mapped_column(Text, default="")
+    answer_ky: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(32), default="general", index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    publication_status: Mapped[str] = mapped_column(String(16), default="draft", index=True)  # draft|published|archived
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    handoff_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    published_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FaqKbVariant(Base):
+    """Structured question-variant row (Increment 5) — never a comma-joined string."""
+
+    __tablename__ = "faq_kb_variants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    faq_entry_id: Mapped[int] = mapped_column(ForeignKey("faq_kb_entries.id"), index=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str | None] = mapped_column(String(8), nullable=True)  # ru|ky|None(both)
+    normalized_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FaqKbVersion(Base):
+    """Snapshot history (Increment 5) — one row per lifecycle event
+    (created/edited/published/disabled/enabled/archived/restored). Only rows with
+    `action IN ('published','restored')` are ever served to the bot (see
+    `app/core/faq_kb.py`); the rest exist purely for audit/history. Publishing and
+    rollback never delete or mutate an existing row here."""
+
+    __tablename__ = "faq_kb_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    faq_entry_id: Mapped[int] = mapped_column(ForeignKey("faq_kb_entries.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    action: Mapped[str] = mapped_column(String(16), default="created")
+    actor: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_faq_kb_versions_entry_version", "faq_entry_id", "version_number"),
+    )
+
+
+class FaqKbAnswerLog(Base):
+    """Minimal prep for Increment 7 (AI-classifier context) — Increment 5 only logs
+    which deterministic FAQ answer was sent, never LLM tokens/cost/model (out of
+    scope here, MUST-NOT list). Best-effort write — see `app/core/faq_kb.py`."""
+
+    __tablename__ = "faq_kb_answer_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, index=True)
+    client_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bot_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="faq")
+    faq_entry_id: Mapped[int] = mapped_column(Integer, index=True)
+    faq_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    matched_variant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    match_type: Mapped[str] = mapped_column(String(16), default="")
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    language: Mapped[str] = mapped_column(String(8), default="ru")
+    missing_answer_ky: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 

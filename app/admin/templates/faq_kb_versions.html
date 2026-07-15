@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intellect College — История версий FAQ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#F1F5F9; --surface:#FFFFFF; --border:#E2E8F0; --text:#0F172A;
+            --muted:#64748B; --accent:#2563EB; --green:#059669; --hot:#DC2626; --amber:#D97706;
+            --mono:'Fira Code', ui-monospace, monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Fira Sans',system-ui,sans-serif; font-size:14px; }
+    .topbar { display:flex; align-items:center; gap:14px; padding:0 20px; height:58px;
+              background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; }
+    .topbar a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .wrap { padding:22px; max-width:900px; margin:0 auto; }
+    h1 { font-size:20px; margin:0 0 4px; }
+    .sub { color:var(--muted); margin:0 0 16px; }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:14px; }
+    .mono { font-family:var(--mono); }
+    .badge { padding:2px 7px; border-radius:6px; background:#F1F5F9; color:var(--muted); font-size:11px; font-weight:600; }
+    .badge.serving { background:rgba(5,150,105,.12); color:var(--green); }
+    .row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:11px 0; border-bottom:1px solid var(--border); }
+    .row:last-child { border-bottom:0; }
+    .muted { color:var(--muted); font-size:12px; }
+    button, .btn { border:1px solid var(--border); border-radius:8px; background:#F8FAFC; color:var(--text);
+                   padding:7px 10px; font:inherit; font-size:12px; font-weight:600; cursor:pointer; text-decoration:none; }
+    button.primary { background:var(--accent); color:white; border-color:var(--accent); }
+    .confirm-box { background:#FFFBEB; border:1px solid rgba(217,119,6,.35); border-radius:8px; padding:10px; margin-bottom:12px; font-size:13px; color:#92400E; }
+    .check { display:flex; gap:6px; align-items:center; font-size:12px; margin:4px 0; padding:6px 4px; cursor:pointer; }
+    .check input { width:20px; height:20px; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#F8FAFC; border:1px solid var(--border); border-radius:6px; padding:8px; font-size:11px; margin:6px 0 0; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/admin/faq-kb">← База знаний</a>
+    <b>История версий: {{ entry.canonical_question }}</b>
+  </header>
+  <div class="wrap">
+    <h1>Версии FAQ #{{ entry.id }}</h1>
+    <p class="sub">Каждое действие (создание/правка/публикация/выключение/включение/архив/откат) добавляет новую строку. История никогда не удаляется. Боту служит только последняя строка со статусом published/restored.</p>
+
+    {% if confirm_required %}
+    <div class="confirm-box">⚠ Откат требует явного подтверждения — поставьте галочку «Подтверждаю» и повторите.</div>
+    {% endif %}
+
+    <section class="panel">
+      {% if versions %}
+        {% for v in versions %}
+        <div class="row">
+          <div>
+            <div><b>v{{ v.version_number }}</b> — {{ version_action_labels.get(v.action, v.action) }}
+              {% if v.action in ('published','restored') %}<span class="badge serving">может отвечать клиентам</span>{% endif %}
+            </div>
+            <div class="muted">{{ v.created_at.strftime('%Y-%m-%d %H:%M') if v.created_at else '—' }} · {{ v.actor or '—' }}</div>
+            <pre>{{ v.snapshot.get('canonical_question', '') }} → {{ v.snapshot.get('answer_ru', '') }}</pre>
+          </div>
+          <div>
+            <form method="post" action="/admin/faq-kb/{{ entry.id }}/rollback">
+              <input type="hidden" name="version_number" value="{{ v.version_number }}">
+              <label class="check"><input type="checkbox" name="confirm" value="1"> подтверждаю — эта версия сразу станет ответом бота</label>
+              <button type="submit" class="primary">Откатить к этой версии</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="muted">Версий пока нет.</div>
+      {% endif %}
+    </section>
+  </div>
+</body>
+</html>

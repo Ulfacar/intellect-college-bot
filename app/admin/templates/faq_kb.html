@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intellect College — База знаний / FAQ</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#F1F5F9; --surface:#FFFFFF; --border:#E2E8F0; --text:#0F172A;
+            --muted:#64748B; --accent:#2563EB; --green:#059669; --hot:#DC2626; --amber:#D97706;
+            --mono:'Fira Code', ui-monospace, monospace; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Fira Sans',system-ui,sans-serif; font-size:14px; }
+    .topbar { display:flex; align-items:center; gap:14px; padding:0 20px; height:58px;
+              background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:2; }
+    .topbar a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .wrap { padding:22px; max-width:1360px; margin:0 auto; }
+    h1 { font-size:20px; margin:0 0 6px; }
+    .sub { color:var(--muted); margin:0 0 16px; }
+    .grid { display:grid; grid-template-columns:minmax(0,1.3fr) 420px; gap:16px; align-items:start; }
+    @media (max-width: 1080px) { .grid { grid-template-columns:1fr; } }
+    .panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
+    .panel h2 { margin:0 0 12px; font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    .filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; align-items:flex-end; }
+    .filters .f { display:flex; flex-direction:column; gap:3px; }
+    .filters label { font-size:11px; color:var(--muted); font-weight:600; }
+    .filters select, .filters input[type="text"] { border:1px solid var(--border); border-radius:7px; padding:6px 8px; font:inherit; background:#F8FAFC; }
+    .filters button { border:1px solid var(--border); border-radius:7px; padding:7px 12px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+    .import-row { display:flex; justify-content:flex-end; }
+    .rule { display:grid; grid-template-columns:1fr auto; gap:12px; padding:13px 0; border-bottom:1px solid var(--border); }
+    .rule:last-child { border-bottom:0; }
+    .title { font-weight:700; margin-bottom:5px; }
+    .meta { display:flex; gap:6px; flex-wrap:wrap; color:var(--muted); font-size:12px; }
+    .mono { font-family:var(--mono); }
+    .badge { padding:2px 7px; border-radius:6px; background:#F1F5F9; color:var(--muted); font-size:11px; font-weight:600; white-space:nowrap; }
+    .badge.on { background:rgba(5,150,105,.12); color:var(--green); }
+    .badge.off { background:rgba(220,38,38,.10); color:var(--hot); }
+    .badge.draft { background:rgba(100,116,139,.14); color:var(--muted); }
+    .badge.published { background:rgba(5,150,105,.12); color:var(--green); }
+    .badge.archived { background:rgba(220,38,38,.10); color:var(--hot); }
+    .badge.warn { background:rgba(217,119,6,.12); color:var(--amber); }
+    .badge.sensitive { background:rgba(220,38,38,.10); color:var(--hot); }
+    .actions { display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap; max-width:220px; }
+    button, .btn { border:1px solid var(--border); border-radius:8px; background:#F8FAFC; color:var(--text);
+                   padding:7px 10px; font:inherit; font-size:12px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; }
+    button.primary { background:var(--accent); color:white; border-color:var(--accent); }
+    button.danger { background:#FEF2F2; color:var(--hot); border-color:rgba(220,38,38,.25); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    label.field { display:block; font-weight:600; margin:11px 0 5px; }
+    input[type="text"], input[type="number"], input[type="datetime-local"], textarea, select.wide {
+      width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; font:inherit; background:#F8FAFC;
+    }
+    textarea { min-height:70px; resize:vertical; }
+    textarea.answer { min-height:120px; }
+    .check { display:flex; gap:8px; align-items:center; margin-top:10px; color:var(--text); font-weight:500; font-size:13px; }
+    .check input { width:20px; height:20px; }
+    /* Real tap-target for the inline confirm checkboxes in the action column. */
+    .confirm-check { display:flex; gap:8px; align-items:center; font-size:12px; margin:4px 0; padding:6px 4px; cursor:pointer; }
+    .confirm-check input { width:20px; height:20px; }
+    .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    @media (max-width: 480px) { .row2 { grid-template-columns:1fr; } }
+    .muted { color:var(--muted); }
+    .hint { color:var(--muted); font-size:11px; margin-top:3px; }
+    .sensitive-hint { color:var(--amber); font-size:11px; margin:2px 0 4px; max-width:210px; }
+    .empty { padding:28px; text-align:center; color:var(--muted); border:1px dashed var(--border); border-radius:10px; }
+    .result { margin-top:12px; padding:11px; border-radius:8px; background:#F8FAFC; border:1px solid var(--border); font-size:13px; line-height:1.5; }
+    .result.match { border-color:rgba(5,150,105,.35); }
+    .result.nomatch { border-color:rgba(220,38,38,.25); }
+    .result .how { color:var(--muted); font-size:12px; }
+    .confirm-box { background:#FFFBEB; border:1px solid rgba(217,119,6,.35); border-radius:8px; padding:10px; margin-bottom:12px; font-size:13px; color:#92400E; }
+    .edit-warn { background:#FFFBEB; border:1px solid rgba(217,119,6,.45); border-radius:8px; padding:10px; margin-bottom:12px; font-size:12px; color:#92400E; }
+    .tabbtn { display:flex; gap:6px; margin-bottom:10px; }
+    .tabbtn button { flex:1; }
+    .tabbtn button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/admin">← Доски</a>
+    <b>База знаний / FAQ</b>
+    <a href="/admin/faq">Legacy FAQ →</a>
+    <a href="/admin/audit">Аудит →</a>
+    <span style="flex:1"></span>
+    <span class="muted">{{ manager.name }}</span>
+  </header>
+  <div class="wrap">
+    <h1>Управляемая мультиязычная база знаний</h1>
+    <p class="sub">Черновик → Опубликовать → бот сразу отвечает опубликованной версией (без рестарта). Правки не влияют на бота, пока не нажать «Опубликовать» ещё раз.</p>
+
+    {% if confirm_required %}
+    <div class="confirm-box">⚠ Действие «{{ action_labels.get(confirm_required, confirm_required) }}» требует подтверждения — поставьте галочку «Подтверждаю» в соответствующей форме и повторите.</div>
+    {% endif %}
+    {% if backfilled %}
+    <div class="confirm-box">Импорт из legacy FAQ: добавлено черновиков — {{ backfilled }}. Ничего не опубликовано автоматически.</div>
+    {% endif %}
+
+    <div class="grid">
+      <div>
+        <section class="panel">
+          <h2>Фильтры</h2>
+          <form class="filters" method="get" action="/admin/faq-kb">
+            <div class="f"><label>Статус</label>
+              <select name="status">
+                <option value="" {{ 'selected' if not filters.status }}>Любой</option>
+                <option value="draft" {{ 'selected' if filters.status == 'draft' }}>Черновик</option>
+                <option value="published" {{ 'selected' if filters.status == 'published' }}>Опубликовано</option>
+                <option value="archived" {{ 'selected' if filters.status == 'archived' }}>Архив</option>
+              </select>
+            </div>
+            <div class="f"><label>Категория</label>
+              <select name="category">
+                <option value="" {{ 'selected' if not filters.category }}>Любая</option>
+                {% for c in categories %}
+                <option value="{{ c }}" {{ 'selected' if filters.category == c }}>{{ category_labels[c] }}{{ ' ⚠' if c in sensitive_categories else '' }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="f"><label>Включено</label>
+              <select name="enabled">
+                <option value="" {{ 'selected' if not filters.enabled }}>Любое</option>
+                <option value="1" {{ 'selected' if filters.enabled == '1' }}>Да</option>
+                <option value="0" {{ 'selected' if filters.enabled == '0' }}>Нет</option>
+              </select>
+            </div>
+            <div class="f"><label>Нет KY</label>
+              <select name="missing_ky">
+                <option value="" {{ 'selected' if not filters.missing_ky }}>Любое</option>
+                <option value="1" {{ 'selected' if filters.missing_ky == '1' }}>Только без KY</option>
+              </select>
+            </div>
+            <div class="f"><label>Handoff</label>
+              <select name="handoff_only">
+                <option value="" {{ 'selected' if not filters.handoff_only }}>Любое</option>
+                <option value="1" {{ 'selected' if filters.handoff_only == '1' }}>Только передача менеджеру</option>
+              </select>
+            </div>
+            <div class="f"><label>Истёк срок</label>
+              <select name="expired">
+                <option value="" {{ 'selected' if not filters.expired }}>Любое</option>
+                <option value="1" {{ 'selected' if filters.expired == '1' }}>Только истёкшие</option>
+              </select>
+            </div>
+            <div class="f"><label>Поиск по вопросу</label>
+              <input type="text" name="q" value="{{ filters.q }}" placeholder="текст вопроса">
+            </div>
+            <button type="submit">Применить</button>
+          </form>
+          <!-- Import form is a SEPARATE form (must NOT be nested inside the GET filters
+               form above, or the browser drops it and the button submits the filters). -->
+          <div class="import-row">
+            <form method="post" action="/admin/faq-kb/backfill">
+              <button type="submit" class="btn" title="Импортировать legacy FAQ как черновики (идемпотентно)">Импорт из legacy FAQ</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Записи ({{ rows|length }})</h2>
+          {% if rows %}
+            {% for r in rows %}
+            {% set unpublished_edits = r.published_at and r.updated_at and r.updated_at > r.published_at %}
+            <div class="rule">
+              <div>
+                <div class="title">{{ r.canonical_question }}</div>
+                <div class="meta">
+                  <span class="badge {{ r.publication_status }}">{{ status_labels.get(r.publication_status, r.publication_status) }}</span>
+                  <span class="badge {{ 'on' if r.enabled else 'off' }}">{{ 'включено' if r.enabled else 'выключено' }}</span>
+                  {% if unpublished_edits %}<span class="badge warn">есть неопубликованные правки</span>{% endif %}
+                  <span class="badge mono">{{ category_labels.get(r.category, r.category) }}</span>
+                  {% if r.category in sensitive_categories %}<span class="badge sensitive">⚠ чувствительная</span>{% endif %}
+                  {% if r.handoff_only %}<span class="badge">передача менеджеру</span>{% endif %}
+                  {% if r.missing_ky %}<span class="badge warn">нет KY</span>{% endif %}
+                  {% if r.is_expired() %}<span class="badge warn">истёк срок</span>{% endif %}
+                  <span class="badge mono">приоритет {{ r.priority }}</span>
+                </div>
+                <div class="muted" style="margin-top:6px;font-size:12px">
+                  обновлено {{ r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else '—' }} · {{ r.updated_by or '—' }}
+                  {% if r.valid_from or r.valid_until %}
+                  · срок: {{ r.valid_from.strftime('%Y-%m-%d') if r.valid_from else '…' }} — {{ r.valid_until.strftime('%Y-%m-%d') if r.valid_until else '…' }}
+                  {% endif %}
+                </div>
+              </div>
+              <div class="actions">
+                <a class="btn" href="/admin/faq-kb?edit={{ r.id }}">Править</a>
+                <a class="btn" href="/admin/faq-kb/{{ r.id }}/versions">Версии</a>
+                {# Publish shown only when it would change what the bot serves: not archived,
+                   AND (not published yet OR the live content has unpublished edits). #}
+                {% if r.publication_status != 'archived' and (r.publication_status != 'published' or unpublished_edits) %}
+                {% if r.category in sensitive_categories %}
+                <form method="post" action="/admin/faq-kb/{{ r.id }}/publish">
+                  <div class="sensitive-hint">Цены, скидки, сроки и договор клиенты цитируют менеджеру — публикуйте только проверенные данные.</div>
+                  <label class="confirm-check"><input type="checkbox" name="confirm" value="1"> подтверждаю: проверил(а) цифры и условия</label>
+                  <button type="submit" class="primary">Опубликовать</button>
+                </form>
+                {% else %}
+                <form method="post" action="/admin/faq-kb/{{ r.id }}/publish" onsubmit="return confirm('Опубликовать? Бот сразу начнёт отвечать этой версией.')">
+                  <input type="hidden" name="confirm" value="1">
+                  <button type="submit" class="primary">Опубликовать</button>
+                </form>
+                {% endif %}
+                {% endif %}
+                {% if r.enabled %}
+                <form method="post" action="/admin/faq-kb/{{ r.id }}/disable">
+                  {% if r.publication_status == 'published' %}
+                  <label class="confirm-check"><input type="checkbox" name="confirm" value="1"> подтверждаю</label>
+                  {% else %}<input type="hidden" name="confirm" value="1">{% endif %}
+                  <button type="submit">Выключить</button>
+                </form>
+                {% else %}
+                <form method="post" action="/admin/faq-kb/{{ r.id }}/enable"><button type="submit">Включить</button></form>
+                {% endif %}
+                {% if r.publication_status != 'archived' %}
+                <form method="post" action="/admin/faq-kb/{{ r.id }}/archive">
+                  <label class="confirm-check"><input type="checkbox" name="confirm" value="1"> подтверждаю</label>
+                  <button type="submit" class="danger">Удалить (архив)</button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty">Записей не найдено — измените фильтры или создайте новую.</div>
+          {% endif %}
+        </section>
+      </div>
+
+      <aside>
+        <section class="panel">
+          <h2>{{ 'Редактирование #' ~ edit.id if edit else 'Новая запись' }}</h2>
+          {% if edit and edit.published_at and edit.updated_at and edit.updated_at > edit.published_at %}
+          <div class="edit-warn">⚠ Изменения сохранены, но бот отвечает версией от {{ edit.published_at.strftime('%Y-%m-%d %H:%M') }} — нажмите «Опубликовать», чтобы бот начал отвечать новой версией.</div>
+          {% endif %}
+          <form method="post" action="/admin/faq-kb/save">
+            <input type="hidden" name="entry_id" value="{{ edit.id if edit else 0 }}">
+            <label class="field">Канонический вопрос</label>
+            <textarea name="canonical_question" required>{{ edit.canonical_question if edit else '' }}</textarea>
+            <label class="field">Варианты вопроса</label>
+            <textarea name="variants" placeholder="сколько стоит обучение&#10;ky|окуу канча турат">{{ edit_variants_text }}</textarea>
+            <div class="hint">Каждая строка — отдельная формулировка вопроса. Префикс ru| или ky| ограничивает язык; без префикса — для обоих языков.</div>
+            <label class="field">Ответ (RU)</label>
+            <textarea class="answer" name="answer_ru" required>{{ edit.answer_ru if edit else '' }}</textarea>
+            <label class="field">Ответ (KY) — необязательно</label>
+            <textarea class="answer" name="answer_ky">{{ edit.answer_ky if edit and edit.answer_ky else '' }}</textarea>
+            <div class="hint">Нет ответа на KY → безопасный фолбэк на RU (помечается «нет KY»).</div>
+            <div class="row2">
+              <div>
+                <label class="field">Категория</label>
+                <select class="wide" name="category">
+                  {% for c in categories %}
+                  <option value="{{ c }}" {{ 'selected' if edit and edit.category == c }}>{{ category_labels[c] }}{{ ' ⚠' if c in sensitive_categories else '' }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <label class="field">Приоритет</label>
+                <input type="number" name="priority" value="{{ edit.priority if edit else 0 }}">
+              </div>
+            </div>
+            <div class="row2">
+              <div>
+                <label class="field">Действует с</label>
+                <input type="datetime-local" name="valid_from" value="{{ edit.valid_from.strftime('%Y-%m-%dT%H:%M') if edit and edit.valid_from else '' }}">
+              </div>
+              <div>
+                <label class="field">Действует по</label>
+                <input type="datetime-local" name="valid_until" value="{{ edit.valid_until.strftime('%Y-%m-%dT%H:%M') if edit and edit.valid_until else '' }}">
+              </div>
+            </div>
+            <label class="check"><input type="checkbox" name="handoff_only" value="1" {{ 'checked' if edit and edit.handoff_only else '' }}> Только передача менеджеру — ответ не отправляется, диалог передаётся менеджеру</label>
+            <button class="primary" type="submit" style="margin-top:14px">Сохранить черновик</button>
+          </form>
+          {% if edit %}
+          <div class="hint" style="margin-top:10px">
+            Статус: <b>{{ status_labels.get(edit.publication_status, edit.publication_status) }}</b>{% if edit.published_at %}, опубликовано {{ edit.published_at.strftime('%Y-%m-%d %H:%M') }} ({{ edit.published_by }}){% endif %}
+          </div>
+          {% endif %}
+        </section>
+
+        <section class="panel">
+          <h2>Тест-панель (playground)</h2>
+          <form method="post" action="/admin/faq-kb/playground">
+            <input type="hidden" name="entry_id" value="{{ playground.entry_id if playground else (edit.id if edit else 0) }}">
+            <div class="tabbtn">
+              <button type="submit" name="mode" value="published" class="{{ 'active' if not playground or playground.mode == 'published' }}">Как отвечает бот сейчас</button>
+              <button type="submit" name="mode" value="draft" class="{{ 'active' if playground and playground.mode == 'draft' }}" {{ 'disabled' if not edit }} title="Сначала откройте запись через «Править»">Проверить черновик (не влияет на бота)</button>
+            </div>
+            <textarea name="text" placeholder="Вопрос клиента для проверки">{{ playground.text if playground else '' }}</textarea>
+            <label class="field">Язык</label>
+            <select class="wide" name="language">
+              <option value="auto" {{ 'selected' if not playground or playground.language == 'auto' }}>Авто (по тексту)</option>
+              <option value="ru" {{ 'selected' if playground and playground.language == 'ru' }}>RU</option>
+              <option value="ky" {{ 'selected' if playground and playground.language == 'ky' }}>KY</option>
+            </select>
+            <button class="primary" type="submit" style="margin-top:10px">Проверить</button>
+          </form>
+          {% if playground %}
+            {% set res = playground.result %}
+            {# Published-mode: if the open entry can't answer (disabled/expired/not published), explain why. #}
+            {% if playground.mode == 'published' and edit and (not res or not res.matched)
+                  and (not edit.enabled or edit.is_expired() or edit.publication_status != 'published') %}
+            <div class="result nomatch">
+              Возможная причина: запись выключена / истёк срок / не опубликована — бот её не использует.
+            </div>
+            {% endif %}
+            {% if res and res.matched %}
+            <div class="result match">
+              <b>Совпадение найдено</b>
+              {% if res.missing_answer_ky %}<span class="badge warn">нет KY, фолбэк RU</span>{% endif %}
+              {% if res.handoff_only %}<span class="badge">передача менеджеру</span>{% endif %}
+              <div class="how" title="faq_entry_id={{ res.faq_entry_id }}, match_type={{ res.match_type }}, variant_id={{ res.matched_variant_id if res.matched_variant_id is not none else 'canonical' }}, faq_version_id={{ res.faq_version_id }}">
+                Найдено по: {{ match_type_labels.get(res.match_type, res.match_type) }}{% if res.score is not none %} (совпадение {{ (res.score * 100)|round|int }}%){% endif %}
+              </div>
+              <div style="margin-top:8px">
+                {% if res.handoff_only %}
+                  <b>Клиенту будет отправлено (передача менеджеру):</b><br>
+                  «Этот вопрос лучше уточнит менеджер. Диалог передан сотруднику колледжа.»
+                  <div class="hint" style="margin-top:6px">Хранимый ответ (для справки менеджеру, НЕ отправляется как есть): {{ res.answer }}</div>
+                {% else %}
+                  <b>Клиенту будет отправлено:</b><br>{{ res.answer }}
+                {% endif %}
+              </div>
+            </div>
+            {% elif res %}
+            <div class="result nomatch">
+              {% if res.reason == 'ambiguous' %}
+                Два правила подходят одинаково — бот не угадывает. Уточните варианты вопроса или приоритет.
+              {% else %}
+                Готового ответа в базе нет — бот ответит сам (ИИ) или передаст менеджеру.
+              {% endif %}
+            </div>
+            {% endif %}
+          {% endif %}
+        </section>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

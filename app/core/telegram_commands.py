@@ -1,7 +1,7 @@
-"""Telegram pilot commands + normal-message dispatcher (Increment 4).
+"""Telegram pilot commands + normal-message dispatcher (Increment 4 + Increment 5 FAQ).
 
-Two responsibilities, kept together because they share the same routing decision
-("is this text a command or a normal message?"):
+Three responsibilities, kept together because they share the same routing decision
+("is this text a command or a normal message, and who/what should answer it?"):
 
 1. **Command parsing/dispatch** (`/newtest /reset /status /manager /bot /feedback /help`)
    — allowlist-only, routed BEFORE `Orchestrator.handle`. Command text NEVER reaches
@@ -10,9 +10,21 @@ Two responsibilities, kept together because they share the same routing decision
    private Telegram update (kept thin per `docs/telegram-pilot-implementation-plan.md`):
    commands short-circuit here; normal messages get an active session ensured
    (auto-created on first contact, §11), then gated on canonical `dialog_owner`
-   (manager/paused -> log to the legacy panel and stay silent; bot -> hand off to the
-   orchestrator, which itself still respects the on/off switch — commands and this
-   dispatcher never bypass it, see §7 OFF semantics).
+   (manager/paused -> log to the legacy panel and stay silent), then on the effective
+   bot on/off switch (`Orchestrator._bots_on()`, global AND individual — OFF -> log to
+   the legacy panel and stay silent, exactly like the manager/paused gate, see
+   `_try_faq_reply` note below), then on the managed FAQ / knowledge base
+   (Increment 5, `app/core/faq_kb.py` + `app/core/faq_matcher.py`) BEFORE the
+   orchestrator: a confident deterministic match answers directly (or hands off, for
+   `handoff_only` entries) WITHOUT ever calling `orchestrator.handle` — no OpenRouter,
+   no second Conversation/Lead, `lead_status` untouched. No match -> falls through to
+   `orchestrator.handle` unchanged (existing LLM/legacy-FAQ pipeline).
+3. **FAQ pipeline integration** (`_try_faq_reply`/`_send_faq_reply`) — reuses
+   `get_conversation_store()` (legacy panel) directly for manager-visible logging of
+   the incoming question and the sent answer/handoff phrase, exactly like
+   `_log_to_legacy_panel` already does for the manager/paused gate and like
+   `Orchestrator._reply` does for the LLM path — `orchestrator.py` itself is NEVER
+   imported or modified here.
 
 Ignored Telegram update types (callback_query/edited_message/non-private chats) are
 filtered in `app/main.py` BEFORE this module is reached — see `app/channels/telegram.py`
@@ -30,6 +42,13 @@ from app.integrations.panel.audit_store import get_audit_store
 from app.integrations.panel.store import get_conversation_store
 
 log = logging.getLogger("telegram_commands")
+
+# Increment 5: safe phrase sent instead of the stored answer for a matched
+# `handoff_only` FAQ entry — never the raw answer_ru/ky (see faq-knowledge-base-spec.md
+# §5 and the Increment 5 design: matched + handoff_only never answers by itself).
+FAQ_HANDOFF_SAFE_PHRASE = (
+    "Этот вопрос лучше уточнит менеджер. Диалог передан сотруднику колледжа."
+)
 
 COMMANDS: set[str] = {"/newtest", "/reset", "/status", "/manager", "/bot", "/feedback", "/help"}
 
@@ -190,9 +209,10 @@ async def handle_command(
 # --------------------------------------------------------------------------------------
 
 async def _log_to_legacy_panel(msg: Message, bot_id: str, orchestrator: Any) -> None:
-    """Same call `Orchestrator._log_in` makes — used when `dialog_owner` is
-    manager/paused so the incoming message still shows up live in the admin panel even
-    though the orchestrator (and therefore FAQ/LLM/auto-status) is never invoked."""
+    """Same call `Orchestrator._log_in` makes — used whenever the orchestrator is
+    deliberately NOT invoked for an otherwise-normal message (`dialog_owner` is
+    manager/paused, the effective on/off switch is OFF) so the incoming message still
+    shows up live in the admin panel."""
     try:
         panel = get_conversation_store()
         key = f"{bot_id}:{msg.user_id}" if bot_id else msg.user_id
@@ -204,17 +224,120 @@ async def _log_to_legacy_panel(msg: Message, bot_id: str, orchestrator: Any) -> 
         if bot_cfg is not None:
             await panel.update_meta(key, funnel=bot_cfg.scenario)
     except Exception:  # noqa: BLE001 — лог не критичен для диалога
-        log.warning("panel log_in (manager/paused gate) failed", exc_info=True)
+        log.warning("panel log_in (manager/paused/off/faq gate) failed", exc_info=True)
+
+
+def _extract_client_message_id(msg: Message) -> str | None:
+    """Best-effort Telegram `message_id` for `faq_kb_answer_log.client_message_id`
+    (nullable — absence is fine, see the answer-log contract in
+    `app/core/faq_kb.py`)."""
+    raw_msg = (msg.raw or {}).get("message") or {}
+    mid = raw_msg.get("message_id")
+    return str(mid) if mid is not None else None
+
+
+async def _send_faq_reply(msg: Message, bot_id: str, adapter: Any, text: str) -> None:
+    """Send + log a deterministic FAQ answer/handoff phrase — mirrors
+    `Orchestrator._reply` (pending -> send -> sent/failed) so the legacy panel shows the
+    same delivery-status lifecycle as the LLM path, without importing orchestrator.py."""
+    panel = get_conversation_store()
+    key = f"{bot_id}:{msg.user_id}" if bot_id else msg.user_id
+    msg_id = 0
+    try:
+        msg_id = await panel.add_message(
+            key, "bot", text, channel=msg.channel, bot_id=bot_id, status="pending", phone=msg.user_id,
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("faq panel log_out failed (bot=%s)", bot_id, exc_info=True)
+    try:
+        await adapter.send(msg.chat_id, text)
+        if msg_id:
+            await panel.mark_message_status(message_id=msg_id, status="sent")
+    except Exception:  # noqa: BLE001 — сбой канала: помечаем failed, диалог не роняем
+        if msg_id:
+            try:
+                await panel.mark_message_status(message_id=msg_id, status="failed")
+            except Exception:  # noqa: BLE001
+                pass
+        log.warning("faq reply send failed (bot=%s)", bot_id, exc_info=True)
+
+
+async def _try_faq_reply(
+    msg: Message, *, bot_id: str, adapter: Any, orchestrator: Any, session: Any,
+) -> bool:
+    """Increment 5: try the managed FAQ / knowledge base BEFORE the orchestrator.
+
+    Fails open (returns False -> caller falls through to `orchestrator.handle`) on any
+    lookup/matching error — a bug in the FAQ layer must never silence the bot. Returns
+    True iff a reply (or handoff) was actually sent, in which case the caller MUST NOT
+    also call `orchestrator.handle` (no double reply, no second Conversation/Lead,
+    `lead_status` untouched, no Trello outbox — see module docstring)."""
+    from app.core import faq_kb, faq_matcher
+
+    text = msg.text or ""
+    try:
+        store = faq_kb.get_faq_kb_store()
+        candidates = await store.list_published_candidates()
+        if not candidates:
+            return False
+        language = faq_matcher.detect_language(text)
+        result = faq_matcher.match(text, candidates, language=language)
+    except Exception:  # noqa: BLE001 — fail open to the normal LLM/legacy-FAQ pipeline
+        log.warning("faq kb lookup/match failed (bot=%s)", bot_id, exc_info=True)
+        return False
+    if not result.matched:
+        return False
+
+    # Incoming question was never logged (orchestrator.handle is being skipped) — log it
+    # now so the manager still sees it live, same as the manager/paused/off gates.
+    await _log_to_legacy_panel(msg, bot_id, orchestrator)
+
+    if result.handoff_only:
+        # Matched + handoff_only: NEVER send the stored answer_ru/ky as the final
+        # answer. Reuse the same request_manager the /manager command uses:
+        # dialog_owner=manager, bot_phase=handoff, lead_status UNCHANGED, no outbox.
+        await ConversationService().request_manager(
+            session.conversation.id, actor="faq:handoff_only",
+            reason=f"faq_entry={result.faq_entry_id}",
+        )
+        reply_text = FAQ_HANDOFF_SAFE_PHRASE
+    else:
+        reply_text = result.answer or ""
+
+    await _send_faq_reply(msg, bot_id, adapter, reply_text)
+
+    try:
+        await faq_kb.get_faq_kb_store().log_answer(
+            conversation_id=session.conversation.id,
+            client_message_id=_extract_client_message_id(msg),
+            bot_message_id=None,
+            source="faq",
+            faq_entry_id=result.faq_entry_id,
+            faq_version_id=result.faq_version_id,
+            matched_variant_id=result.matched_variant_id,
+            match_type=result.match_type or "",
+            match_score=result.score,
+            language=result.language,
+            missing_answer_ky=result.missing_answer_ky,
+        )
+    except Exception:  # noqa: BLE001 — best-effort: must never break the reply already sent
+        log.warning("faq answer log write failed (bot=%s)", bot_id, exc_info=True)
+
+    return True
 
 
 async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator: Any) -> None:
     """Route one already-allowlisted, already-private Telegram `Message`.
 
-    Commands are handled entirely here (never reach the orchestrator). Normal messages
-    get an active session ensured (auto-created on first contact) and are gated on the
-    session's canonical `dialog_owner` BEFORE the orchestrator is invoked — this does
-    NOT bypass the bot on/off switch: when `dialog_owner == "bot"` the orchestrator is
-    still called, and it applies its own `_bots_on()` check internally (unchanged)."""
+    Commands are handled entirely here (never reach the orchestrator or FAQ). Normal
+    messages get an active session ensured (auto-created on first contact) and are
+    gated, IN ORDER: canonical `dialog_owner` (manager/paused -> legacy-panel log only,
+    stay silent) -> effective bot on/off switch (`orchestrator._bots_on()`, global AND
+    individual — OFF -> legacy-panel log only, stay silent; this check is duplicated
+    here, rather than relying solely on the orchestrator's own internal check, so the
+    managed FAQ layer below is ALSO gated by it, not just the LLM path) -> managed FAQ
+    / knowledge base (Increment 5, deterministic, no LLM — a match answers/hands off
+    and STOPS here) -> orchestrator (existing LLM/legacy-FAQ pipeline, unchanged)."""
     if not msg.user_id:
         return  # служебный/пустой апдейт — как в Orchestrator.handle, ничего не создаём
     text = msg.text or ""
@@ -237,6 +360,17 @@ async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator
     )
     if session.conversation.dialog_owner in ("manager", "paused"):
         await _log_to_legacy_panel(msg, bot_id, orchestrator)
+        return
+
+    # Effective on/off switch (global AND individual) — checked defensively via
+    # getattr: production `Orchestrator` always has `_bots_on`; minimal test fakes that
+    # only implement `.handle()` are treated as "on" (they don't exercise the switch).
+    bots_on_check = getattr(orchestrator, "_bots_on", None)
+    if bots_on_check is not None and not await bots_on_check():
+        await _log_to_legacy_panel(msg, bot_id, orchestrator)
+        return
+
+    if await _try_faq_reply(msg, bot_id=bot_id, adapter=adapter, orchestrator=orchestrator, session=session):
         return
 
     await orchestrator.handle(msg)

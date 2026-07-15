@@ -526,6 +526,304 @@ async def faq_test(request: Request, manager: dict = Depends(require_admin),
     }, headers={"Cache-Control": "no-store"})
 
 
+# ========================================================================================
+# База знаний / FAQ (Increment 5) — managed multilingual FAQ, separate from the legacy
+# section above (`faq_entries`/`app/core/faq.py`, untouched). See `app/core/faq_kb.py`
+# (store + publication lifecycle) and `app/core/faq_matcher.py` (pure matching).
+# ========================================================================================
+
+FAQ_KB_CATEGORY_LABELS: dict[str, str] = {
+    "general": "Общее",
+    "contacts": "Контакты",
+    "schedule": "Часы работы / расписание",
+    "admission": "Поступление",
+    "documents": "Документы",
+    "directions": "Направления",
+    "tuition": "Стоимость обучения",
+    "discounts": "Скидки",
+    "payment": "Оплата",
+    "entrance_test": "Вступительный тест",
+    "passing_score": "Проходной балл",
+    "deadlines": "Сроки / дедлайны",
+    "contract": "Договор",
+    "infrastructure": "Инфраструктура",
+    "employment": "Трудоустройство",
+    "international": "Международное",
+    "other": "Другое",
+}
+
+# RU labels (UI-only mapping — do NOT change store/matcher semantics). Raw enum codes
+# stay canonical in the backend; these dicts humanize them in templates.
+FAQ_KB_STATUS_LABELS: dict[str, str] = {
+    "draft": "черновик", "published": "опубликовано", "archived": "архив",
+}
+# Confirm-banner lifecycle action codes (publish/disable/archive/enable/rollback).
+FAQ_KB_LIFECYCLE_ACTION_LABELS: dict[str, str] = {
+    "publish": "Опубликовать", "disable": "Выключить", "archive": "Удалить (архив)",
+    "enable": "Включить", "rollback": "Откат",
+}
+# Version-history action codes.
+FAQ_KB_VERSION_ACTION_LABELS: dict[str, str] = {
+    "created": "создано", "edited": "изменено", "published": "опубликовано",
+    "disabled": "выключено", "enabled": "включено", "archived": "архивировано",
+    "restored": "откат к версии",
+}
+# Matcher match_type codes.
+FAQ_KB_MATCH_TYPE_LABELS: dict[str, str] = {
+    "canonical": "точный вопрос", "variant": "вариант вопроса",
+    "normalized": "частичное совпадение", "fuzzy": "похожая формулировка",
+}
+
+
+def _truthy(v: str) -> bool:
+    return v in ("1", "true", "on", "True")
+
+
+def _tri_bool(v: str) -> bool | None:
+    """Tri-state filter select: "" -> любое, "1" -> да, "0" -> нет."""
+    if v == "1":
+        return True
+    if v == "0":
+        return False
+    return None
+
+
+def _parse_dt_local(raw: str) -> datetime | None:
+    """`<input type="datetime-local">` (`YYYY-MM-DDTHH:MM`) -> aware UTC datetime."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _fmt_dt_local(dt: datetime | None) -> str:
+    if not dt:
+        return ""
+    return dt.strftime("%Y-%m-%dT%H:%M")
+
+
+def _parse_variant_lines(raw: str) -> list[dict]:
+    """One structured variant per line. Optional `ru|`/`ky|` prefix pins the
+    variant's language; no prefix -> language=None (matches either)."""
+    out = []
+    for line in _lines(raw):
+        prefix = line[:3].lower()
+        if prefix in ("ru|", "ky|"):
+            out.append({"text": line[3:].strip(), "language": prefix[:2]})
+        else:
+            out.append({"text": line.strip(), "language": None})
+    return [v for v in out if v["text"]]
+
+
+def _variants_to_lines(variants) -> str:
+    lines = []
+    for v in variants:
+        lines.append(f"{v.language}|{v.text}" if v.language else v.text)
+    return "\n".join(lines)
+
+
+async def _faq_kb_context(request: Request, manager: dict, *, edit_id: int = 0) -> dict:
+    from app.core.faq_kb import CATEGORIES, SENSITIVE_CATEGORIES, get_faq_kb_store
+
+    qp = request.query_params
+    status = qp.get("status", "")
+    category = qp.get("category", "")
+    enabled = qp.get("enabled", "")
+    missing_ky = qp.get("missing_ky", "")
+    handoff_only = qp.get("handoff_only", "")
+    expired = qp.get("expired", "")
+    q = qp.get("q", "")
+
+    store = get_faq_kb_store()
+    rows = await store.list_entries(
+        status=status or None, category=category or None, enabled=_tri_bool(enabled),
+        missing_ky=_tri_bool(missing_ky), handoff_only=_tri_bool(handoff_only),
+        expired=_tri_bool(expired), search=q or None,
+    )
+    edit_id = edit_id or int(qp.get("edit") or 0)
+    edit = await store.get_entry(edit_id) if edit_id else None
+    edit_variants = await store.list_variants(edit_id) if edit_id else []
+    return {
+        "manager": manager, "rows": rows, "categories": CATEGORIES,
+        "category_labels": FAQ_KB_CATEGORY_LABELS, "sensitive_categories": SENSITIVE_CATEGORIES,
+        "status_labels": FAQ_KB_STATUS_LABELS, "action_labels": FAQ_KB_LIFECYCLE_ACTION_LABELS,
+        "match_type_labels": FAQ_KB_MATCH_TYPE_LABELS,
+        "filters": {"status": status, "category": category, "enabled": enabled,
+                    "missing_ky": missing_ky, "handoff_only": handoff_only,
+                    "expired": expired, "q": q},
+        "edit": edit, "edit_variants_text": _variants_to_lines(edit_variants),
+        "confirm_required": qp.get("confirm_required", ""),
+        "backfilled": qp.get("backfilled", ""),
+        "playground": None,
+    }
+
+
+@router.get("/faq-kb", response_class=HTMLResponse)
+async def faq_kb_page(request: Request, manager: dict = Depends(require_admin)):
+    """Раздел «База знаний / FAQ» — управляемая мультиязычная база (Increment 5)."""
+    ctx = await _faq_kb_context(request, manager)
+    return templates.TemplateResponse(request, "faq_kb.html", ctx, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/faq-kb/save", response_class=HTMLResponse)
+async def faq_kb_save(request: Request, manager: dict = Depends(require_admin),
+                      entry_id: int = Form(0), canonical_question: str = Form(""),
+                      variants: str = Form(""), answer_ru: str = Form(""),
+                      answer_ky: str = Form(""), category: str = Form("general"),
+                      priority: int = Form(0), handoff_only: str = Form("0"),
+                      valid_from: str = Form(""), valid_until: str = Form("")):
+    """«Сохранить черновик» — создать/обновить контент. НЕ публикует (бот не увидит
+    изменения, пока не нажать «Опубликовать» — см. app/core/faq_kb.py)."""
+    from app.core.faq_kb import get_faq_kb_store
+
+    if not canonical_question.strip() or not answer_ru.strip():
+        raise HTTPException(status_code=400, detail="canonical_question and answer_ru are required")
+    data = {
+        "canonical_question": canonical_question, "answer_ru": answer_ru,
+        "answer_ky": answer_ky or None, "category": category, "priority": priority,
+        "handoff_only": _truthy(handoff_only),
+        "valid_from": _parse_dt_local(valid_from), "valid_until": _parse_dt_local(valid_until),
+    }
+    variant_rows = _parse_variant_lines(variants)
+    store = get_faq_kb_store()
+    if entry_id:
+        entry = await store.update_draft(entry_id, data, variant_rows, manager["login"])
+        action = "faq_kb_update"
+    else:
+        entry = await store.create_draft(data, variant_rows, manager["login"])
+        action = "faq_kb_create"
+    if entry is None:
+        raise HTTPException(status_code=404, detail="faq-kb entry not found")
+    await get_conversation_store().add_audit(manager["login"], action, "", f"{entry.id}: {entry.canonical_question}")
+    return RedirectResponse(f"/admin/faq-kb?edit={entry.id}", status_code=303)
+
+
+async def _faq_kb_lifecycle_action(entry_id: int, manager: dict, action: str, *, confirm: str, **kwargs) -> RedirectResponse:
+    from app.core.faq_kb import get_faq_kb_store
+
+    store = get_faq_kb_store()
+    method = getattr(store, action)
+    result = await method(entry_id, manager["login"], confirm=_truthy(confirm), **kwargs)
+    if not result.ok and result.error == "confirmation_required":
+        return RedirectResponse(f"/admin/faq-kb?edit={entry_id}&confirm_required={action}", status_code=303)
+    if result.ok:
+        await get_conversation_store().add_audit(manager["login"], f"faq_kb_{action}", "", str(entry_id))
+    return RedirectResponse(f"/admin/faq-kb?edit={entry_id}", status_code=303)
+
+
+@router.post("/faq-kb/{entry_id}/publish")
+async def faq_kb_publish(entry_id: int, manager: dict = Depends(require_admin), confirm: str = Form("0")):
+    """Публикация. Чувствительные категории (§5) требуют явного подтверждения —
+    иначе остаётся черновиком/текущим статусом."""
+    return await _faq_kb_lifecycle_action(entry_id, manager, "publish", confirm=confirm)
+
+
+@router.post("/faq-kb/{entry_id}/disable")
+async def faq_kb_disable(entry_id: int, manager: dict = Depends(require_admin), confirm: str = Form("0")):
+    """Выключить (enabled=false) — немедленно перестаёт отвечать. Отключение УЖЕ
+    опубликованного правила требует подтверждения."""
+    return await _faq_kb_lifecycle_action(entry_id, manager, "disable", confirm=confirm)
+
+
+@router.post("/faq-kb/{entry_id}/enable")
+async def faq_kb_enable(entry_id: int, manager: dict = Depends(require_admin)):
+    from app.core.faq_kb import get_faq_kb_store
+
+    store = get_faq_kb_store()
+    result = await store.enable(entry_id, manager["login"])
+    if result.ok:
+        await get_conversation_store().add_audit(manager["login"], "faq_kb_enable", "", str(entry_id))
+    return RedirectResponse(f"/admin/faq-kb?edit={entry_id}", status_code=303)
+
+
+@router.post("/faq-kb/{entry_id}/archive")
+async def faq_kb_archive(entry_id: int, manager: dict = Depends(require_admin), confirm: str = Form("0")):
+    """«Удалить» = архивировать (soft-delete). Хард-delete запрещён — история хранится
+    всегда. Требует подтверждения без исключений."""
+    return await _faq_kb_lifecycle_action(entry_id, manager, "archive", confirm=confirm)
+
+
+@router.get("/faq-kb/{entry_id}/versions", response_class=HTMLResponse)
+async def faq_kb_versions_page(entry_id: int, request: Request, manager: dict = Depends(require_admin)):
+    """История версий + форма отката."""
+    from app.core.faq_kb import get_faq_kb_store
+
+    store = get_faq_kb_store()
+    entry = await store.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="faq-kb entry not found")
+    versions = list(reversed(await store.list_versions(entry_id)))
+    return templates.TemplateResponse(request, "faq_kb_versions.html", {
+        "manager": manager, "entry": entry, "versions": versions,
+        "category_labels": FAQ_KB_CATEGORY_LABELS,
+        "version_action_labels": FAQ_KB_VERSION_ACTION_LABELS,
+        "confirm_required": request.query_params.get("confirm_required", ""),
+    }, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/faq-kb/{entry_id}/rollback")
+async def faq_kb_rollback(entry_id: int, manager: dict = Depends(require_admin),
+                          version_number: int = Form(...), confirm: str = Form("0")):
+    """«Откатить к версии N» — создаёт НОВУЮ версию (action=restored) из старого
+    снапшота; история не удаляется. Требует подтверждения без исключений."""
+    from app.core.faq_kb import get_faq_kb_store
+
+    store = get_faq_kb_store()
+    result = await store.rollback(entry_id, version_number, manager["login"], confirm=_truthy(confirm))
+    if not result.ok and result.error == "confirmation_required":
+        return RedirectResponse(f"/admin/faq-kb/{entry_id}/versions?confirm_required=1", status_code=303)
+    if result.ok:
+        await get_conversation_store().add_audit(
+            manager["login"], "faq_kb_rollback", "", f"{entry_id} -> v{version_number}")
+    return RedirectResponse(f"/admin/faq-kb?edit={entry_id}", status_code=303)
+
+
+@router.post("/faq-kb/playground", response_class=HTMLResponse)
+async def faq_kb_playground(request: Request, manager: dict = Depends(require_admin),
+                            mode: str = Form("published"), entry_id: int = Form(0),
+                            text: str = Form(""), language: str = Form("auto")):
+    """Тест-панель: (1) Published only — реальное поведение бота; (2) Preview draft —
+    проверка редактируемого черновика ДО публикации (никогда не попадает в реальный
+    Telegram-конвейер — просто отдельный вызов матчера)."""
+    from app.core import faq_kb, faq_matcher
+
+    store = faq_kb.get_faq_kb_store()
+    if mode == "draft" and entry_id:
+        candidate = await store.get_entry_candidate(entry_id)
+        candidates = [candidate] if candidate else []
+    else:
+        mode = "published"
+        candidates = await store.list_published_candidates()
+
+    lang = language if language in ("ru", "ky") else faq_matcher.detect_language(text)
+    result = None
+    if text.strip():
+        result = faq_matcher.match(text, candidates, language=lang)
+
+    ctx = await _faq_kb_context(request, manager, edit_id=entry_id)
+    ctx["playground"] = {
+        "mode": mode, "entry_id": entry_id, "text": text, "language": language, "result": result,
+    }
+    return templates.TemplateResponse(request, "faq_kb.html", ctx, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/faq-kb/backfill")
+async def faq_kb_backfill(manager: dict = Depends(require_admin)):
+    """Идемпотентный импорт legacy `faq_entries` как черновиков (никогда не
+    авто-публикует). Повторный вызов не дублирует уже импортированные строки."""
+    from app.core.faq_kb import get_faq_kb_store
+
+    count = await get_faq_kb_store().backfill_legacy(manager["login"])
+    await get_conversation_store().add_audit(manager["login"], "faq_kb_backfill", "", f"imported={count}")
+    return RedirectResponse(f"/admin/faq-kb?backfilled={count}", status_code=303)
+
+
 @router.get("/board/{funnel}", response_class=HTMLResponse)
 async def board(funnel: str, request: Request, _: dict = Depends(require_admin)):
     """HTMX-партиал одной доски: колонки по стадиям с карточками."""
