@@ -409,6 +409,67 @@ class FaqKbAnswerLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AiAnswerLog(Base):
+    """Increment 6 telegram-pilot: ONE additive table for both §14 LLM usage/cost and
+    §15 answer-context — a single structured OpenRouter call produces both at once, so
+    there is no separate "classification log" table (that would just duplicate the
+    conversation_id/created_at join key for no benefit). Written EXCLUSIVELY by
+    `app/core/ai_reply.py` (via `app/core/budget.py::reserve` for the initial placeholder
+    row and `app/integrations/panel/ai_log_store.py::finalize` for the final update).
+
+    Never stores the full system prompt, raw model output, or secrets — only the
+    structured usage/cost/outcome + the already-validated classification fields (§15).
+    `outcome` documents what happened to THIS call: reserved (placeholder, budget
+    granted, call not finished yet) | sent | cancelled_by_takeover | validator_blocked |
+    budget_exhausted | schema_error | timeout | connection | unauthorized |
+    payment_required | http_error | error.
+    """
+
+    __tablename__ = "ai_answer_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    generation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("pilot_conversations.id"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True)
+    bot_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_source: Mapped[str | None] = mapped_column(String(16), nullable=True)   # provider|estimated
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(24), default="reserved", index=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    client_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bot_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="llm")
+    knowledge_entry_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    intent: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    applied_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lead_temperature: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bot_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    dialog_owner: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    validator_violations: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_ai_answer_log_bot_created", "bot_id", "created_at"),
+    )
+
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 

@@ -88,8 +88,19 @@ def test_unknown_bot_id_not_accepted():
     assert resp.json()["reason"] == "unknown_bot"
 
 
+async def _fake_generate_and_send_reply(msg, *, bot_id, adapter, orchestrator, session):
+    """Increment 6: `orchestrator.handle` is no longer called for normal messages —
+    `app/core/ai_reply.py::generate_and_send_reply` replaced it (see
+    `app/core/telegram_commands.py`). These security/gating tests only care whether the
+    pipeline was reached at all (exactly once), not about LLM specifics — reuse
+    `_RecordingOrch.handled` as that signal by patching the real entry point."""
+    orchestrator.handled.append(msg)
+    return "sent"
+
+
 def test_per_bot_secret_required(monkeypatch):
     monkeypatch.setattr(settings, "telegram_allowed_user_ids", [777])
+    monkeypatch.setattr("app.core.ai_reply.generate_and_send_reply", _fake_generate_and_send_reply)
     orch = _inject_bot("secbot", secret="topsecret")
     try:
         with TestClient(m.app) as client:
@@ -130,6 +141,7 @@ def test_non_allowlisted_user_not_handled(monkeypatch):
 def test_dedup_prevents_double_handle(monkeypatch):
     monkeypatch.setattr(settings, "telegram_allowed_user_ids", [777])
     monkeypatch.setattr(settings, "webhook_secret", "")
+    monkeypatch.setattr("app.core.ai_reply.generate_and_send_reply", _fake_generate_and_send_reply)
     orch = _inject_bot("dedupbot", secret="")
     try:
         body = {"update_id": 555, "message": {"from": {"id": 777}, "chat": {"id": 777}, "text": "hi"}}

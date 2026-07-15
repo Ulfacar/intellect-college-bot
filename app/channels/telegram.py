@@ -46,8 +46,17 @@ class TelegramAdapter:
             raw=raw,
         )
 
-    async def send(self, chat_id: str, text: str, **kwargs) -> None:
-        await self._bot.send_message(chat_id=int(chat_id), text=text, **kwargs)
+    async def send(self, chat_id: str, text: str, **kwargs) -> str | None:
+        """Sends the message and returns Telegram's `message_id` (as a string) when
+        available — Increment 6 (`app/core/ai_reply.py`) records it as
+        `ai_answer_log.bot_message_id`/panel `provider_msg_id` for delivery tracing.
+        `Orchestrator._reply` already treats this return value as optional
+        (`provider or None`), so this is a minimal, backward-compatible extension of
+        the existing `ChannelAdapter.send` contract — fake adapters in tests that
+        still return `None` (or nothing) are unaffected."""
+        sent = await self._bot.send_message(chat_id=int(chat_id), text=text, **kwargs)
+        message_id = getattr(sent, "message_id", None)
+        return str(message_id) if message_id is not None else None
 
 
 # Update-type/chat-type helpers (Increment 4 телеграм-пилота) — работают на сыром

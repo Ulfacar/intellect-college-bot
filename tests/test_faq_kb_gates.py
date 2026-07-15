@@ -154,11 +154,17 @@ def test_individual_off_blocks_faq_for_that_bot_only():
 
 
 # --------------------------------------------------------------------------------------
-# 35. No FAQ match -> falls through unchanged to orchestrator.handle.
+# 35. No FAQ match -> Increment 6: falls through to app/core/ai_reply.py, NOT
+# orchestrator.handle (see telegram_commands.py's "IMPORTANT (Increment 6)" note).
+# Without an OPENROUTER_API_KEY (never set in tests) the structured client fails fast
+# with error="no_api_key" — no real network call — and ai_reply sends its own honest
+# technical fallback instead of the FAQ layer's (silent) non-match.
 # --------------------------------------------------------------------------------------
 
-def test_no_faq_match_falls_through_to_orchestrator():
+def test_no_faq_match_falls_through_to_ai_reply_not_orchestrator():
     async def scenario():
+        from app.core import ai_reply
+
         await _publish_faq(question="сколько стоит обучение")
         bot_id, uid = "gate_5", "g35"
         orch = _RecordingOrch()
@@ -166,9 +172,8 @@ def test_no_faq_match_falls_through_to_orchestrator():
         msg = Message(channel="telegram", user_id=uid, chat_id=uid, text="есть ли общежитие", kind="text")
         await telegram_commands.route_message(msg, bot_id=bot_id, adapter=adapter, orchestrator=orch)
 
-        assert adapter.sent == []          # FAQ layer sent nothing
-        assert len(orch.handled) == 1      # orchestrator DID get called
-        assert orch.handled[0].text == "есть ли общежитие"
+        assert orch.handled == []          # orchestrator.handle is NEVER called on this path
+        assert adapter.sent == [ai_reply.TECHNICAL_ERROR_FALLBACK]
     _run(scenario())
 
 

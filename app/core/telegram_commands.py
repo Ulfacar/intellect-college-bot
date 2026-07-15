@@ -14,17 +14,24 @@ Three responsibilities, kept together because they share the same routing decisi
    bot on/off switch (`Orchestrator._bots_on()`, global AND individual — OFF -> log to
    the legacy panel and stay silent, exactly like the manager/paused gate, see
    `_try_faq_reply` note below), then on the managed FAQ / knowledge base
-   (Increment 5, `app/core/faq_kb.py` + `app/core/faq_matcher.py`) BEFORE the
-   orchestrator: a confident deterministic match answers directly (or hands off, for
-   `handoff_only` entries) WITHOUT ever calling `orchestrator.handle` — no OpenRouter,
-   no second Conversation/Lead, `lead_status` untouched. No match -> falls through to
-   `orchestrator.handle` unchanged (existing LLM/legacy-FAQ pipeline).
-3. **FAQ pipeline integration** (`_try_faq_reply`/`_send_faq_reply`) — reuses
+   (Increment 5, `app/core/faq_kb.py` + `app/core/faq_matcher.py`) BEFORE
+   `app/core/ai_reply.py`: a confident deterministic match answers directly (or hands
+   off, for `handoff_only` entries) WITHOUT ever calling `orchestrator.handle` — no OpenRouter,
+   no second Conversation/Lead, `lead_status` untouched. No FAQ match -> Increment 6
+   gates (non-text / budget) -> `app/core/ai_reply.py::generate_and_send_reply`.
+3. **FAQ pipeline integration** (`_try_faq_reply`/`_send_faq_reply`) reuses
    `get_conversation_store()` (legacy panel) directly for manager-visible logging of
    the incoming question and the sent answer/handoff phrase, exactly like
    `_log_to_legacy_panel` already does for the manager/paused gate and like
-   `Orchestrator._reply` does for the LLM path — `orchestrator.py` itself is NEVER
-   imported or modified here.
+   `Orchestrator._reply` does for the LLM path.
+
+IMPORTANT (Increment 6): `orchestrator.handle(...)` is NO LONGER called from this
+module's normal-message path. `orchestrator.py` itself is UNCHANGED and is still used
+as-is by other channels (the single-bot `/webhook/telegram` route in `app/main.py`,
+WhatsApp/Bitrix) -- only the Telegram-pilot `route_message` path below replaced the old
+"FAQ no-match -> orchestrator.handle" fallthrough with the new non-text/budget gates
+plus `app/core/ai_reply.py`, avoiding the legacy-FAQ double answer AND the legacy LLM
+call.
 
 Ignored Telegram update types (callback_query/edited_message/non-private chats) are
 filtered in `app/main.py` BEFORE this module is reached — see `app/channels/telegram.py`
@@ -36,18 +43,23 @@ import logging
 from typing import Any
 
 from app.channels.base import Message
-from app.core import telegram_sessions
+from app.core import ai_reply, budget, telegram_sessions
 from app.core.conversation_service import ConversationService
 from app.integrations.panel.audit_store import get_audit_store
 from app.integrations.panel.store import get_conversation_store
 
 log = logging.getLogger("telegram_commands")
 
+# Increment 6, pipeline-integration gate (a): non-text messages never reach the LLM.
+NON_TEXT_SAFE_FALLBACK = (
+    "Голосовые/медиа пока не распознаём — напишите, пожалуйста, текстом."
+)
+
 # Increment 5: safe phrase sent instead of the stored answer for a matched
 # `handoff_only` FAQ entry — never the raw answer_ru/ky (see faq-knowledge-base-spec.md
 # §5 and the Increment 5 design: matched + handoff_only never answers by itself).
 FAQ_HANDOFF_SAFE_PHRASE = (
-    "Этот вопрос лучше уточнит менеджер. Диалог передан сотруднику колледжа."
+    "Этот вопрос лучше уточнит менеджер приёмной комиссии — передала ему ваш диалог."
 )
 
 COMMANDS: set[str] = {"/newtest", "/reset", "/status", "/manager", "/bot", "/feedback", "/help"}
@@ -208,16 +220,18 @@ async def handle_command(
 # route_message — single entry point called from app/main.py webhook handler.
 # --------------------------------------------------------------------------------------
 
-async def _log_to_legacy_panel(msg: Message, bot_id: str, orchestrator: Any) -> None:
+async def _log_to_legacy_panel(msg: Message, bot_id: str, orchestrator: Any, *, text: str | None = None) -> None:
     """Same call `Orchestrator._log_in` makes — used whenever the orchestrator is
     deliberately NOT invoked for an otherwise-normal message (`dialog_owner` is
-    manager/paused, the effective on/off switch is OFF) so the incoming message still
-    shows up live in the admin panel."""
+    manager/paused, the effective on/off switch is OFF, or Increment 6's non-text/AI
+    path) so the incoming message still shows up live in the admin panel. `text`
+    override lets non-text messages log a readable placeholder (mirrors
+    `Orchestrator._handle_non_text`'s `"[медиа/голос]"`) instead of the empty string."""
     try:
         panel = get_conversation_store()
         key = f"{bot_id}:{msg.user_id}" if bot_id else msg.user_id
         await panel.add_message(
-            key, "client", msg.text, channel=msg.channel, bot_id=bot_id,
+            key, "client", text if text is not None else msg.text, channel=msg.channel, bot_id=bot_id,
             chat_id=msg.chat_id, phone=msg.user_id,
         )
         bot_cfg = getattr(orchestrator, "bot", None)
@@ -337,7 +351,11 @@ async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator
     here, rather than relying solely on the orchestrator's own internal check, so the
     managed FAQ layer below is ALSO gated by it, not just the LLM path) -> managed FAQ
     / knowledge base (Increment 5, deterministic, no LLM — a match answers/hands off
-    and STOPS here) -> orchestrator (existing LLM/legacy-FAQ pipeline, unchanged)."""
+    and STOPS here) -> Increment 6 gates, IN ORDER: (a) non-text -> safe fallback, log,
+    STOP (no LLM); (b) LLM budget exhausted -> safe fallback, log, STOP (no LLM); (c)
+    else -> `app/core/ai_reply.py::generate_and_send_reply` (single structured
+    OpenRouter call). `orchestrator.handle` is NEVER called from this path — see the
+    module docstring's "IMPORTANT (Increment 6)" note."""
     if not msg.user_id:
         return  # служебный/пустой апдейт — как в Orchestrator.handle, ничего не создаём
     text = msg.text or ""
@@ -373,4 +391,20 @@ async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator
     if await _try_faq_reply(msg, bot_id=bot_id, adapter=adapter, orchestrator=orchestrator, session=session):
         return
 
-    await orchestrator.handle(msg)
+    # Increment 6: incoming was NOT logged by _try_faq_reply (no match) — log it now,
+    # same as the manager/paused/off gates above, since orchestrator.handle (which
+    # otherwise always logs first) is never reached on this path.
+    if msg.kind == "non_text":
+        await _log_to_legacy_panel(msg, bot_id, orchestrator, text="[медиа/голос]")
+        await _send_faq_reply(msg, bot_id, adapter, NON_TEXT_SAFE_FALLBACK)
+        return
+
+    await _log_to_legacy_panel(msg, bot_id, orchestrator)
+
+    if (await budget.is_exhausted(bot_id=bot_id)).exhausted:
+        await _send_faq_reply(msg, bot_id, adapter, ai_reply.BUDGET_EXHAUSTED_FALLBACK)
+        return
+
+    await ai_reply.generate_and_send_reply(
+        msg, bot_id=bot_id, adapter=adapter, orchestrator=orchestrator, session=session,
+    )

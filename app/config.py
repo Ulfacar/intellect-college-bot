@@ -53,6 +53,19 @@ class Settings(BaseSettings):
     llm_model_main: str = ""
     llm_model_cheap: str = ""
 
+    # --- Increment 6: single structured call (reply + classification + qualification) ---
+    # 0/empty = unlimited (no budget gate). Global across all bots — see app/core/budget.py
+    # for the documented per-process reserve approach (Postgres: advisory-lock-guarded
+    # transaction; memory: same single-worker/sticky assumption as the rest of this
+    # codebase, e.g. app/core/orchestrator.py's `_key_locks`).
+    llm_daily_budget_usd: float = 0.0
+    llm_monthly_budget_usd: float = 0.0
+    llm_request_timeout_seconds: float = 30.0
+    llm_max_output_tokens: int = 1024
+    # Below this, classification.suggested_status is stored as a suggestion only —
+    # never auto-applied via LeadStatusService (see app/core/ai_reply.py).
+    ai_status_confidence_threshold: float = 0.90
+
     telegram_bot_token: str = ""
     telegram_bots: list[TelegramBotConfig] = []
     # Allowlist тестировщиков Telegram-пилота. Пусто = пилот закрыт (доступ запрещён всем).
