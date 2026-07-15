@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, func, inspect, text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -164,6 +164,84 @@ class FaqEntry(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Lead(Base):
+    """Канонический бизнес-лид (Increment 2 телеграм-пилота).
+
+    Единственный источник истины для `lead_status` (11 ключей воронки) — см.
+    `docs/phase1-implementation-plan.md` §0.1 и `docs/admin-bot-control-and-ai-classification-spec.md`
+    §5/§6. `DialogState` (app/core/state.py) НЕ является вторым источником истины и
+    `lead_status` не хранит. Lead может существовать БЕЗ Conversation (например, карточка
+    заведена вручную) — связь односторонняя: `PilotConversation.lead_id -> Lead.id`.
+
+    Таблица `leads` — НОВАЯ, не пересекается с legacy `Conversation`/`conversations`
+    (`panel/store.py::ConversationView`), которая остаётся как есть для старой панели.
+    """
+
+    __tablename__ = "leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead_status: Mapped[str] = mapped_column(String(32), default="new", index=True)
+    lead_source: Mapped[str] = mapped_column(String(32), default="telegram_test", index=True)
+    name: Mapped[str] = mapped_column(String(160), default="")
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    grade_base: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    direction: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    qualification: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    lead_temperature: Mapped[str] = mapped_column(String(16), default="new")
+    suggested_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    next_action_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    escalation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manual_status_lock_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status_change_source: Mapped[str | None] = mapped_column(String(16), nullable=True)  # bot|admin|trello|system
+    status_change_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status_change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PilotConversation(Base):
+    """Канонический диалог (Increment 2 телеграм-пилота) — `bot_phase`/`dialog_owner` живут
+    здесь, `lead_status` НЕ здесь (он в `Lead`, см. выше).
+
+    Отдельная таблица `pilot_conversations`, т.к. имя `conversations` уже занято legacy
+    `Conversation` (см. класс выше) — не переименовываем и не трогаем старую панель.
+    Связь `lead_id -> leads.id` nullable: диалог может временно существовать без лида,
+    лид — без диалога (Q2 admin-bot-control-and-ai-classification-spec.md).
+    """
+
+    __tablename__ = "pilot_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    channel: Mapped[str] = mapped_column(String(32), default="telegram")
+    bot_id: Mapped[str] = mapped_column(String(64), default="")
+    external_user_id: Mapped[str] = mapped_column(String(160), default="")
+    external_chat_id: Mapped[str] = mapped_column(String(160), default="")
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True)
+    bot_phase: Mapped[str] = mapped_column(String(32), default="greeting")   # greeting|qualification|consultation|waiting|handoff
+    dialog_owner: Mapped[str] = mapped_column(String(16), default="bot")     # bot|manager|paused
+    assigned_to: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # NULL = активна
+
+    __table_args__ = (
+        Index("ix_pilot_conversations_bot_user", "bot_id", "external_user_id"),
+        Index("ix_pilot_conversations_lead_id", "lead_id"),
     )
 
 
