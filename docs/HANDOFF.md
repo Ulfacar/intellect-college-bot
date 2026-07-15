@@ -365,9 +365,12 @@
   (`DialogState` + карточка, синхронизируются `_set_intercept`, `router.py:799-807`). Бот
   молчит, если `intercepted=true`.
 - **Глобальный и по-ботовый рубильник:** флаги `bots_enabled` (мастер) и
-  `bots_enabled:<bot_id>` (переопределяет мастер для одного номера) — переключаются из
-  панели (`/admin/flags/{key}`, `/admin/bots/{bot_id}/toggle`), живут в БД (`core/flags.py`),
-  меняются **без рестарта**.
+  `bots_enabled:<bot_id>` — переключаются из панели (`/admin/flags/{key}`,
+  `/admin/bots/{bot_id}/toggle`), живут в БД (`core/flags.py`), меняются **без рестарта**.
+  ⚠ **Текущее** поведение кода — *переопределение* (per-bot флаг работает независимо от мастера,
+  т.е. может включить бота при общем OFF). Это **противоречит** утверждённой владельцем формуле
+  `effective = global AND individual` и подлежит исправлению в Phase 1 (см.
+  `admin-bot-control-and-ai-classification-spec.md` §2 и `requirements-traceability.md`).
 - **Ручной перехват сотрудником:** кнопка «Перехватить (бот замолчит)» или отправка ответа
   из панели → `intercepted=true` + `assigned_to`=менеджер (авто).
 - **Возврат диалога боту:** кнопка «Вернуть боту» (`/conversation/{user_id}/release`) →
