@@ -13,11 +13,14 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from datetime import datetime, timezone
+
 from app.integrations.crm.db import Lead as LeadRow
 from app.integrations.crm.db import PilotConversation as PilotConversationRow
 from app.integrations.crm.db import Conversation as LegacyConversationRow
 from app.integrations.crm.db import init_models
 from app.integrations.panel.leadstore import (
+    ConflictError,
     MemoryLeadStore,
     PostgresLeadStore,
     dialog_owner_to_intercepted,
@@ -277,6 +280,136 @@ def test_additive_schema_keeps_legacy_tables_and_columns():
 
     conv_columns = {c.name for c in PilotConversationRow.__table__.columns}
     assert {"bot_phase", "dialog_owner", "lead_id", "archived_at"}.issubset(conv_columns)
+
+
+# --------------------------------------------------------------------------------------
+# Increment 3: UNSET-семантика update_lead/update_conversation (14-17).
+# --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_update_lead_omitted_field_stays_unchanged(backend):
+    async def scenario():
+        store = await _store(backend)
+        lead = await store.create_lead(name="Иван", lead_temperature="warm")
+
+        updated = await store.update_lead(lead.id, lead_status="in_progress")
+
+        assert updated.lead_status == "in_progress"
+        assert updated.name == "Иван"                 # не передано -> не тронуто
+        assert updated.lead_temperature == "warm"      # не передано -> не тронуто
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_update_lead_explicit_none_clears_manual_status_lock_until(backend):
+    async def scenario():
+        store = await _store(backend)
+        lead = await store.create_lead()
+        await store.update_lead(lead.id, manual_status_lock_until=datetime.now(timezone.utc))
+
+        cleared = await store.update_lead(lead.id, manual_status_lock_until=None)
+
+        assert cleared.manual_status_lock_until is None
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_update_lead_explicit_none_clears_suggested_status(backend):
+    async def scenario():
+        store = await _store(backend)
+        lead = await store.create_lead()
+        await store.update_lead(lead.id, suggested_status="callback")
+
+        cleared = await store.update_lead(lead.id, suggested_status=None)
+
+        assert cleared.suggested_status is None
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_update_lead_explicit_none_clears_next_action_at(backend):
+    async def scenario():
+        store = await _store(backend)
+        lead = await store.create_lead()
+        await store.update_lead(lead.id, next_action_at=datetime.now(timezone.utc))
+
+        cleared = await store.update_lead(lead.id, next_action_at=None)
+
+        assert cleared.next_action_at is None
+
+    _run(scenario())
+
+
+def test_update_lead_rejects_none_for_non_nullable_field():
+    async def scenario():
+        store = MemoryLeadStore()
+        lead = await store.create_lead()
+        with pytest.raises(ValueError):
+            await store.update_lead(lead.id, lead_status=None)
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_update_conversation_unset_semantics(backend):
+    async def scenario():
+        store = await _store(backend)
+        conv = await store.create_conversation(bot_id="college_1", external_user_id="tg-unset")
+
+        updated = await store.update_conversation(conv.id, bot_phase="qualification")
+        assert updated.bot_phase == "qualification"
+        assert updated.dialog_owner == "bot"      # не передано -> не тронуто
+
+        cleared = await store.update_conversation(conv.id, lead_id=None)
+        assert cleared.lead_id is None
+
+    _run(scenario())
+
+
+def test_update_conversation_rejects_none_for_non_nullable_field():
+    async def scenario():
+        store = MemoryLeadStore()
+        conv = await store.create_conversation(bot_id="college_1", external_user_id="tg-nonnull")
+        with pytest.raises(ValueError):
+            await store.update_conversation(conv.id, dialog_owner=None)
+
+    _run(scenario())
+
+
+# --------------------------------------------------------------------------------------
+# Increment 3: active-session guard (33-34).
+# --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_create_conversation_rejects_second_active_session_same_bot_user(backend):
+    async def scenario():
+        store = await _store(backend)
+        await store.create_conversation(bot_id="college_1", external_user_id="tg-dup")
+
+        with pytest.raises(ConflictError):
+            await store.create_conversation(bot_id="college_1", external_user_id="tg-dup")
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_create_new_session_does_not_trip_active_session_guard(backend):
+    async def scenario():
+        store = await _store(backend)
+        conv1, _lead1 = await store.create_new_session(bot_id="college_2", external_user_id="tg-dup2")
+
+        conv2, _lead2 = await store.create_new_session(bot_id="college_2", external_user_id="tg-dup2")
+
+        assert conv2.id != conv1.id
+        assert conv2.archived_at is None
+        active = await store.get_active_conversation("college_2", "tg-dup2")
+        assert active is not None
+        assert active.id == conv2.id
+
+    _run(scenario())
 
 
 def test_init_models_creates_new_tables_alongside_legacy():

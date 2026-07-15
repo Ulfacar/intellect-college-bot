@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, inspect, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func, inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -245,6 +245,70 @@ class PilotConversation(Base):
     )
 
 
+class LeadAudit(Base):
+    """Аудит смен `lead_status`/`dialog_owner`/`bot_phase` (Increment 3 телеграм-пилота).
+
+    Additive-таблица `lead_audit`, не пересекается ни с legacy `audit_log`
+    (`panel/store.py`-аудит перехватов/отправок), ни с `leads`/`pilot_conversations`
+    (только ссылается на них). Единственный источник записи — `app/core/
+    lead_status_service.py::LeadStatusService` (для `lead_status_changed`/
+    `status_change_blocked`) и `app/core/conversation_service.py::ConversationService`
+    (для `dialog_owner_changed`). Никаких секретов/полных промптов/лишних PII — только
+    коды статусов/owner, короткие reason/actor.
+    """
+
+    __tablename__ = "lead_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True, index=True)
+    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("pilot_conversations.id"), nullable=True)
+    # lead_status_changed | dialog_owner_changed | bot_phase_changed | status_change_blocked
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    previous_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    new_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    previous_owner: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    new_owner: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="")   # bot|admin|trello|system
+    actor: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # атрибут "metadata" зарезервирован DeclarativeBase (Base.metadata) -> используем
+    # metadata_ как имя python-атрибута, колонка в БД по-прежнему называется "metadata".
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # Индексы на lead_id/event_type создаются через column-level index=True выше
+    # (ix_lead_audit_lead_id / ix_lead_audit_event_type) — отдельных Index() в
+    # __table_args__ не нужно (дублирование имени ломает create_all на SQLite).
+
+
+class Outbox(Base):
+    """Outbox-заглушка (Increment 3 телеграм-пилота) — событие ставится ТОЛЬКО при
+    реальной смене `lead_status` (см. `LeadStatusService.set_status`/
+    `apply_invited_handoff`). Никакого реального Trello-воркера в Phase 1 — события
+    остаются `pending`, пока не появится Phase 2 consumer (см.
+    docs/phase1-implementation-plan.md §8). Приложение и тесты никогда не делают
+    сетевых вызовов через эту таблицу.
+    """
+
+    __tablename__ = "outbox"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    aggregate_type: Mapped[str] = mapped_column(String(32), default="lead")
+    aggregate_id: Mapped[int] = mapped_column(Integer, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), default="lead_status_changed")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)   # pending|processed|error
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
@@ -259,7 +323,13 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 async def init_models(engine: AsyncEngine) -> None:
-    """Создать таблицы (дев/тесты без Alembic). В проде схему ведёт Alembic."""
+    """Создать таблицы (дев/тесты без Alembic). В проде схему ведёт Alembic.
+
+    `Base.metadata.create_all` создаёт ВСЕ ORM-модели на этом `Base`, включая новые
+    аддитивные `leads`/`pilot_conversations` (Increment 2) и `lead_audit`/`outbox`
+    (Increment 3, см. `migrations/0002_lead_status_audit_outbox.sql` — параллельный
+    ручной SQL-эквивалент) — отдельного шага для них не требуется.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_columns(conn, "conversations", {
