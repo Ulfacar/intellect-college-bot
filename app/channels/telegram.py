@@ -48,3 +48,26 @@ class TelegramAdapter:
 
     async def send(self, chat_id: str, text: str, **kwargs) -> None:
         await self._bot.send_message(chat_id=int(chat_id), text=text, **kwargs)
+
+
+# Update-type/chat-type helpers (Increment 4 телеграм-пилота) — работают на сыром
+# update-dict ДО parse(), чтобы вебхук мог отфильтровать callback_query/edited_message/
+# групповые чаты, вообще не создавая Message/Conversation/Lead (§9 ТЗ инкремента).
+
+def update_kind(raw: dict) -> str:
+    """Классифицировать сырой Telegram-update: message | edited_message |
+    callback_query | other (неизвестный/служебный тип — не обрабатываем)."""
+    if "callback_query" in raw:
+        return "callback_query"
+    if "edited_message" in raw:
+        return "edited_message"
+    if "message" in raw:
+        return "message"
+    return "other"
+
+
+def chat_type(raw: dict) -> str:
+    """`chat.type` из `message`/`edited_message` ("" если поле отсутствует — старые
+    тестовые фикстуры не всегда его задают; трактуем "" как приватный чат)."""
+    msg = raw.get("message") or raw.get("edited_message") or {}
+    return str((msg.get("chat") or {}).get("type", ""))

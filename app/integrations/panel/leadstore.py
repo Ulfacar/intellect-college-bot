@@ -353,17 +353,49 @@ class MemoryLeadStore:
     async def create_new_session(
         self, *, bot_id: str, external_user_id: str, external_chat_id: str = "",
         channel: str = "telegram", lead_source: str = DEFAULT_LEAD_SOURCE,
+        _raise_before_commit: bool = False,
     ) -> tuple[PilotConversationView, LeadView]:
-        """Начать новую сессию: архивировать текущую активную (история НЕ удаляется),
-        создать свежий Conversation + свежий Lead и связать их."""
+        """Атомарно (Increment 4): архивировать текущую активную сессию (история НЕ
+        удаляется), создать НОВЫЙ Lead + НОВЫЙ Conversation, связанные `lead_id`.
+
+        All-or-nothing: и Lead, и Conversation полностью строятся ЗАРАНЕЕ (id
+        зарезервированы, объекты собраны), а вставка в сторы + архивация старой сессии
+        происходят одним синхронным блоком БЕЗ `await` между шагами — нет точки, где
+        другая корутина может увидеть промежуточное состояние (например, Lead без
+        связанного Conversation). См. `docs/admin-bot-control-and-ai-classification-spec.md`
+        §17 ("нет частичного создания") и Postgres-эквивалент ниже (одна транзакция).
+
+        `_raise_before_commit` — только для тестов (см. `_apply_atomic_memory` в
+        `lead_status_service.py` за тем же паттерном): инжектит сбой ПОСЛЕ подготовки
+        объектов, но ДО единственной точки мутации — доказывает, что при сбое ничего не
+        применяется (ни архивация старой сессии, ни вставка новой пары)."""
         old = await self.get_active_conversation(bot_id, external_user_id)
-        if old is not None:
-            await self.archive_conversation(old.id)
-        lead = await self.create_lead(lead_source=lead_source)
-        conv = await self.create_conversation(
-            channel=channel, bot_id=bot_id, external_user_id=external_user_id,
-            external_chat_id=external_chat_id, lead_id=lead.id,
+        now = _now()
+
+        next_lead_id = self._lead_seq + 1
+        lead = LeadView(
+            id=next_lead_id, lead_status=DEFAULT_LEAD_STATUS, lead_source=lead_source,
+            lead_temperature=DEFAULT_LEAD_TEMPERATURE, created_at=now, updated_at=now,
         )
+        next_conv_id = self._conv_seq + 1
+        conv = PilotConversationView(
+            id=next_conv_id, session_id=_new_session_id(), channel=channel, bot_id=bot_id,
+            external_user_id=external_user_id, external_chat_id=external_chat_id,
+            lead_id=next_lead_id, bot_phase=DEFAULT_BOT_PHASE, dialog_owner=DEFAULT_DIALOG_OWNER,
+            created_at=now, updated_at=now,
+        )
+
+        if _raise_before_commit:
+            raise RuntimeError("injected failure (test-only, _raise_before_commit)")
+
+        # Единственная точка мутации — без await между шагами.
+        if old is not None:
+            old.archived_at = now
+            old.updated_at = now
+        self._lead_seq = next_lead_id
+        self._leads[next_lead_id] = lead
+        self._conv_seq = next_conv_id
+        self._conversations[next_conv_id] = conv
         return conv, lead
 
 
@@ -531,16 +563,53 @@ class PostgresLeadStore:
     async def create_new_session(
         self, *, bot_id: str, external_user_id: str, external_chat_id: str = "",
         channel: str = "telegram", lead_source: str = DEFAULT_LEAD_SOURCE,
+        _raise_before_commit: bool = False,
     ) -> tuple[PilotConversationView, LeadView]:
-        old = await self.get_active_conversation(bot_id, external_user_id)
-        if old is not None:
-            await self.archive_conversation(old.id)
-        lead = await self.create_lead(lead_source=lead_source)
-        conv = await self.create_conversation(
-            channel=channel, bot_id=bot_id, external_user_id=external_user_id,
-            external_chat_id=external_chat_id, lead_id=lead.id,
-        )
-        return conv, lead
+        """Атомарно (Increment 4): ОДНА транзакция — архивировать активную сессию (если
+        есть) + вставить Lead + вставить PilotConversation, связанные `lead_id`. Любая
+        ошибка внутри транзакции -> rollback целиком, orphan Lead без Conversation не
+        остаётся (§17 admin-bot-control-and-ai-classification-spec.md).
+
+        `_raise_before_commit` — только для тестов (тот же паттерн, что
+        `LeadStatusService._apply_atomic_postgres`): инжектит сбой ПОСЛЕ обоих
+        `flush()` (оба ряда уже видны внутри транзакции), но ДО выхода из
+        `session.begin()` — коммит не происходит, всё откатывается."""
+        from app.integrations.crm.db import Lead, PilotConversation
+        now = _now()
+        async with self._sm()() as session:
+            async with session.begin():
+                old_row = (await session.execute(
+                    select(PilotConversation)
+                    .where(PilotConversation.bot_id == bot_id)
+                    .where(PilotConversation.external_user_id == external_user_id)
+                    .where(PilotConversation.archived_at.is_(None))
+                    .order_by(PilotConversation.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                if old_row is not None:
+                    old_row.archived_at = now
+
+                lead_row = Lead(
+                    lead_status=DEFAULT_LEAD_STATUS, lead_source=lead_source,
+                    lead_temperature=DEFAULT_LEAD_TEMPERATURE,
+                )
+                session.add(lead_row)
+                await session.flush()  # присваивает lead_row.id (нужен для FK ниже)
+
+                conv_row = PilotConversation(
+                    session_id=_new_session_id(), channel=channel, bot_id=bot_id,
+                    external_user_id=external_user_id, external_chat_id=external_chat_id,
+                    lead_id=lead_row.id, bot_phase=DEFAULT_BOT_PHASE, dialog_owner=DEFAULT_DIALOG_OWNER,
+                )
+                session.add(conv_row)
+                await session.flush()
+
+                if _raise_before_commit:
+                    raise RuntimeError("injected failure (test-only, _raise_before_commit)")
+            # `async with session.begin()` закоммитил транзакцию на выходе без ошибки.
+            await session.refresh(lead_row)
+            await session.refresh(conv_row)
+            return _conv_view(conv_row), _lead_view(lead_row)
 
 
 def _lead_view(row) -> LeadView:

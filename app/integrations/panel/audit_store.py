@@ -31,6 +31,9 @@ from app.config import settings
 
 EVENT_TYPES = {
     "lead_status_changed", "dialog_owner_changed", "bot_phase_changed", "status_change_blocked",
+    # Increment 4 (telegram-pilot): /feedback comment, saved via existing audit_store
+    # (see app/core/telegram_commands.py) — no separate Feedback model in this increment.
+    "test_note",
 }
 
 

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.channels.bitrix_openlines import BitrixOpenLinesAdapter, bot_id_from_event, nest_form
-from app.channels.telegram import TelegramAdapter
+from app.channels.telegram import TelegramAdapter, chat_type as _tg_chat_type, update_kind as _tg_update_kind
 from app.channels.wappi import (
     WappiAdapter,
     is_delivery_status,
@@ -20,7 +20,7 @@ from app.channels.wappi import (
     parse_delivery_status,
 )
 from app.config import BotConfig, settings
-from app.core import observ
+from app.core import observ, telegram_commands
 from app.core.bots import registry
 from app.core.orchestrator import Orchestrator
 from app.integrations.panel.store import get_conversation_store
@@ -217,7 +217,13 @@ async def telegram_test_webhook(bot_id: str, request: Request):
 
     Безопасность: произвольный bot_id из URL не принимаем — бот должен существовать в
     реестре (иначе 404); секрет проверяем per-bot через X-Telegram-Bot-Api-Secret-Token;
-    пользователь вне allowlist не приводит к созданию Conversation/Lead и вызову LLM."""
+    пользователь вне allowlist не приводит к созданию Conversation/Lead и вызову LLM.
+
+    Increment 4: дедуп по update_id — ПЕРВЫЙ гейт (до любого побочного эффекта команд);
+    затем игнорируем не поддерживаемые типы апдейтов (callback_query/edited_message/
+    не-приватные чаты — без создания Conversation/Lead, без вызова LLM, §9 ТЗ); только
+    приватные текстовые/медиа `message`-апдейты allowlisted-пользователей идут в
+    `telegram_commands.route_message` (команды + гейт dialog_owner + оркестратор)."""
     entry = _telegram_test.get(bot_id)
     if entry is None:
         return JSONResponse({"ok": False, "reason": "unknown_bot"}, status_code=404)
@@ -227,11 +233,21 @@ async def telegram_test_webhook(bot_id: str, request: Request):
     raw = await request.json()
     if _tg_seen_before(f"{bot_id}:{raw.get('update_id')}"):
         return {"ok": True, "dedup": True}
+    kind = _tg_update_kind(raw)
+    if kind == "callback_query":
+        return {"ok": True, "skipped": "callback_query"}
+    if kind == "edited_message":
+        log.info("telegram edited_message ignored (bot=%s)", bot_id)  # без текста/ПДн
+        return {"ok": True, "skipped": "edited_message"}
+    if kind != "message":
+        return {"ok": True, "skipped": "unsupported_update"}
+    if _tg_chat_type(raw) not in ("", "private"):
+        return {"ok": True, "skipped": "non_private_chat"}
     if not _tg_update_allowed(raw):
         log.info("telegram allowlist reject (bot=%s)", bot_id)  # без текста/ПДн
         return {"ok": True, "skipped": "not_allowed"}
     msg = await adapter.parse(raw)
-    await orchestrator.handle(msg)
+    await telegram_commands.route_message(msg, bot_id=bot_id, adapter=adapter, orchestrator=orchestrator)
     return {"ok": True}
 
 
