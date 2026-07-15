@@ -85,16 +85,21 @@ class Orchestrator:
         return f"{self._bot_id}:{msg.user_id}" if self.bot else msg.user_id
 
     async def _bots_on(self) -> bool:
-        """Рубильник авто-ответов (флаг в БД, переключается из панели).
+        """Рубильник авто-ответов: effective = global_bots_enabled AND individual.
 
-        Per-bot ключ `bots_enabled:<bot_id>` переопределяет глобальный `bots_enabled`:
-        позволяет включить тест-ботов в Telegram, не будя боевой WhatsApp (его боты
-        персональный ключ не задают → наследуют глобальный, сейчас OFF)."""
+        Утверждённая владельцем формула:
+            effective_bot_enabled = global_bots_enabled AND individual_bot_enabled
+        Общий OFF (`bots_enabled=false`) выключает ВСЕ боты, даже если у бота
+        персональный флаг ON — индивидуальный ON не может обойти общий OFF. При общем ON
+        индивидуальный `bots_enabled:<bot_id>` может выключить только выбранного бота
+        (по умолчанию бот ON). Диалоги без bot_id зависят только от общего флага."""
         from app.core import flags
         global_on = await flags.get_flag("bots_enabled", True)
+        if not global_on:
+            return False
         if self._bot_id:
-            return await flags.get_flag(f"bots_enabled:{self._bot_id}", global_on)
-        return global_on
+            return await flags.get_flag(f"bots_enabled:{self._bot_id}", True)
+        return True
 
     async def handle(self, msg: Message) -> None:
         if not msg.user_id:

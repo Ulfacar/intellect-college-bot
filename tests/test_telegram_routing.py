@@ -19,22 +19,42 @@ def test_orchestrator_forces_scenario_from_telegram_bot():
     assert orch._bot_id == "college_tg"
 
 
-def test_per_bot_flag_enables_test_bot_without_waking_others():
-    """Глобальный bots_enabled=OFF, но персональный флаг тест-бота=ON → этот бот отвечает,
-    остальные (WhatsApp, без персонального флага) наследуют глобальный OFF и молчат."""
+def test_global_off_disables_all_bots_even_with_individual_on():
+    """AND-формула (решение владельца #3): общий bots_enabled=OFF выключает ВСЕ боты,
+    даже если у бота персональный флаг ON. Отменяет прежнюю override-семантику."""
     from app.core import flags
 
     flags.reset()
-    asyncio.run(flags.set_flag("bots_enabled", False))                  # глобально OFF (как на проде)
-    asyncio.run(flags.set_flag("bots_enabled:college_tg", True))   # включаем точечно тест-бот
+    asyncio.run(flags.set_flag("bots_enabled", False))                # глобально OFF
+    asyncio.run(flags.set_flag("bots_enabled:college_tg", True))      # индивидуальный ON
 
     admission_bot = Orchestrator(channel=None, bot=BotConfig(id="college_tg", scenario="admission"))
     whatsapp_bot = Orchestrator(channel=None, bot=BotConfig(id="wa_main", scenario="admission"))
     dev_bot = Orchestrator(channel=None)  # без bot → только глобальный флаг
 
-    assert asyncio.run(admission_bot._bots_on()) is True       # персональный флаг переопределил
-    assert asyncio.run(whatsapp_bot._bots_on()) is False   # наследует глобальный OFF — молчит
-    assert asyncio.run(dev_bot._bots_on()) is False        # тоже по глобальному
+    # global OFF имеет абсолютный приоритет: индивидуальный ON его не обходит.
+    assert asyncio.run(admission_bot._bots_on()) is False
+    assert asyncio.run(whatsapp_bot._bots_on()) is False
+    assert asyncio.run(dev_bot._bots_on()) is False
+
+    flags.reset()
+
+
+def test_global_on_individual_off_disables_only_selected():
+    """При общем ON индивидуальный OFF выключает только выбранного бота, остальные работают."""
+    from app.core import flags
+
+    flags.reset()
+    asyncio.run(flags.set_flag("bots_enabled", True))                 # глобально ON
+    asyncio.run(flags.set_flag("bots_enabled:college_tg", False))     # индивидуально OFF
+
+    off_bot = Orchestrator(channel=None, bot=BotConfig(id="college_tg", scenario="admission"))
+    on_bot = Orchestrator(channel=None, bot=BotConfig(id="college_other", scenario="admission"))
+    dev_bot = Orchestrator(channel=None)
+
+    assert asyncio.run(off_bot._bots_on()) is False   # global ON AND individual OFF
+    assert asyncio.run(on_bot._bots_on()) is True     # global ON AND default individual ON
+    assert asyncio.run(dev_bot._bots_on()) is True    # global ON, без bot_id
 
     flags.reset()
 

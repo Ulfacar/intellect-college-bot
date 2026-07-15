@@ -681,27 +681,28 @@ def test_feature_toggle_buttons():
 
 
 def test_per_bot_toggle_sets_flag_and_orchestrator_uses_it():
-    """Админский тумблер конкретного бота пишет bots_enabled:<id>, оркестратор читает его."""
+    """Тумблер конкретного бота пишет bots_enabled:<id>; при общем ON индивидуальный OFF
+    выключает только его (формула global AND individual, решение владельца #3)."""
     _clear_memory()
     from app.core import flags
 
-    asyncio.run(flags.set_flag("bots_enabled", False))
+    asyncio.run(flags.set_flag("bots_enabled", True))  # общий ON
     client = _auth_client()
 
-    resp = client.post("/admin/bots/college_1/toggle", data={"on": "1"})
+    resp = client.post("/admin/bots/college_2/toggle", data={"on": "0"})  # индивидуально OFF
 
     assert resp.status_code == 200
-    assert "college_1" in resp.text
-    assert asyncio.run(flags.get_flag("bots_enabled:college_1", False)) is True
+    assert "college_2" in resp.text
+    assert asyncio.run(flags.get_flag("bots_enabled:college_2", True)) is False
     assert asyncio.run(Orchestrator(
         channel=_FakeChannel(),
         bot=BotConfig(id="college_1", scenario="admission"),
-    )._bots_on()) is True
+    )._bots_on()) is True   # global ON AND default individual ON
     assert asyncio.run(Orchestrator(
         channel=_FakeChannel(),
         bot=BotConfig(id="college_2", scenario="admission"),
-    )._bots_on()) is False
-    assert any(a["action"] == "flag" and "bots_enabled:college_1=on" in a["detail"]
+    )._bots_on()) is False  # global ON AND individual OFF
+    assert any(a["action"] == "flag" and "bots_enabled:college_2=off" in a["detail"]
                for a in panel_store._memory_store._audit)
 
     assert client.post("/admin/bots/nope/toggle", data={"on": "1"}).status_code == 404

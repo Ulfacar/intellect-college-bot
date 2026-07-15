@@ -31,8 +31,28 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 
+def _log_config_safety() -> None:
+    """Безопасная валидация конфигурации при старте — БЕЗ вывода токенов/ключей/секретов."""
+    tg_ids = [tb.id for tb in settings.telegram_bots]
+    log.info(
+        "Config: telegram_bots=%s single_tg=%s allow_users=%d allow_chats=%d "
+        "openrouter_key=%s model_main=%s",
+        tg_ids or "[]",
+        bool(settings.telegram_bot_token),
+        len(settings.telegram_allowed_user_ids),
+        len(settings.telegram_allowed_chat_ids),
+        bool(settings.openrouter_api_key),
+        settings.llm_model_main or "(unset)",
+    )
+    if (settings.telegram_bots or settings.telegram_bot_token) and not (
+        settings.telegram_allowed_user_ids or settings.telegram_allowed_chat_ids
+    ):
+        log.warning("Telegram allowlist пуст — пилот закрыт для ВСЕХ (задайте TELEGRAM_ALLOWED_USER_IDS)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _log_config_safety()
     # Создаём схему БД (идемпотентно), если используется Postgres под CRM или панель.
     if settings.crm_backend == "postgres" or settings.panel_backend == "postgres":
         from app.integrations.crm.db import init_db
@@ -93,6 +113,44 @@ def _seen_before(event_id: str) -> bool:
         _seen_wappi_ids.popitem(last=False)
     return False
 
+
+# Дедуп Telegram-апдейтов по ключу `<bot_id>:<update_id>` — повторная доставка не плодит ответы.
+_seen_tg_ids: "OrderedDict[str, None]" = OrderedDict()
+
+
+def _tg_seen_before(key: str) -> bool:
+    """True, если Telegram-апдейт с таким ключом уже обрабатывали. Без update_id не дедупим."""
+    if not key or key.endswith(":None") or key.endswith(":"):
+        return False
+    if key in _seen_tg_ids:
+        return True
+    _seen_tg_ids[key] = None
+    if len(_seen_tg_ids) > _SEEN_MAX:
+        _seen_tg_ids.popitem(last=False)
+    return False
+
+
+def _tg_update_allowed(raw: dict) -> bool:
+    """Гейт allowlist: разбираем from.id/chat.id из апдейта, не создавая Conversation/Lead."""
+    from app.core import allowlist
+    msg = raw.get("message") or raw.get("edited_message") or {}
+    uid = (msg.get("from") or {}).get("id")
+    cid = (msg.get("chat") or {}).get("id")
+    return allowlist.is_allowed(uid, cid)
+
+
+def _tg_secret_ok(request: Request, bot_id: str) -> bool:
+    """Проверка per-bot секрета через заголовок X-Telegram-Bot-Api-Secret-Token.
+
+    Ожидаемый секрет — свой у бота (`TelegramBotConfig.webhook_secret`) или общий
+    `settings.webhook_secret`. Пустой ожидаемый секрет → пропускаем (обратная совместимость)."""
+    cfg = _tg_bot_cfgs.get(bot_id)
+    expected = (cfg.webhook_secret if cfg and cfg.webhook_secret else settings.webhook_secret)
+    if not expected:
+        return True
+    got = request.headers.get("x-telegram-bot-api-secret-token", "")
+    return bool(got) and secrets.compare_digest(got, expected)
+
 # Админ-панель (канбан диалогов + чат + перехват).
 if settings.admin_enabled:
     from app.admin.router import router as admin_router
@@ -107,10 +165,12 @@ _telegram_orchestrator = Orchestrator(channel=_telegram) if _telegram else None
 # ЖЁСТКИМ сценарием admission (как WhatsApp-боты). Маршрут — /webhook/telegram/<id>.
 # Ключ диалога bot_id:user_id, поэтому тестовые боты не пересекаются.
 _telegram_test: dict[str, tuple[TelegramAdapter, Orchestrator]] = {}
+_tg_bot_cfgs: dict = {}  # id → TelegramBotConfig (для per-bot webhook secret)
 for _tb in settings.telegram_bots:
     _tg_bot = BotConfig(id=_tb.id, scenario=_tb.scenario, title=_tb.title)
     _tg_adapter = TelegramAdapter(token=_tb.token)
     _telegram_test[_tb.id] = (_tg_adapter, Orchestrator(channel=_tg_adapter, bot=_tg_bot))
+    _tg_bot_cfgs[_tb.id] = _tb
 
 # Прод: по оркестратору на каждого настроенного бота (свой канал + сценарий).
 _bot_orchestrators: dict[str, Orchestrator] = {
@@ -141,6 +201,11 @@ async def telegram_webhook(request: Request):
     if _telegram_orchestrator is None:
         return {"ok": False, "reason": "telegram_disabled"}
     raw = await request.json()
+    if _tg_seen_before(f"single:{raw.get('update_id')}"):
+        return {"ok": True, "dedup": True}
+    if not _tg_update_allowed(raw):
+        log.info("telegram allowlist reject (single bot)")  # без текста/ПДн
+        return {"ok": True, "skipped": "not_allowed"}
     msg = await _telegram.parse(raw)
     await _telegram_orchestrator.handle(msg)  # не-текст/перехват — внутри оркестратора
     return {"ok": True}
@@ -148,14 +213,23 @@ async def telegram_webhook(request: Request):
 
 @app.post("/webhook/telegram/{bot_id}")
 async def telegram_test_webhook(bot_id: str, request: Request):
-    """Тестовый Telegram-бот (песочница): свой токен + жёсткий admission-сценарий."""
-    if not _verify_webhook(request, telegram=True):
-        return JSONResponse({"ok": False, "reason": "forbidden"}, status_code=403)
+    """Тестовый Telegram-бот (песочница): свой токен + жёсткий admission-сценарий.
+
+    Безопасность: произвольный bot_id из URL не принимаем — бот должен существовать в
+    реестре (иначе 404); секрет проверяем per-bot через X-Telegram-Bot-Api-Secret-Token;
+    пользователь вне allowlist не приводит к созданию Conversation/Lead и вызову LLM."""
     entry = _telegram_test.get(bot_id)
     if entry is None:
         return JSONResponse({"ok": False, "reason": "unknown_bot"}, status_code=404)
+    if not _tg_secret_ok(request, bot_id):
+        return JSONResponse({"ok": False, "reason": "forbidden"}, status_code=403)
     adapter, orchestrator = entry
     raw = await request.json()
+    if _tg_seen_before(f"{bot_id}:{raw.get('update_id')}"):
+        return {"ok": True, "dedup": True}
+    if not _tg_update_allowed(raw):
+        log.info("telegram allowlist reject (bot=%s)", bot_id)  # без текста/ПДн
+        return {"ok": True, "skipped": "not_allowed"}
     msg = await adapter.parse(raw)
     await orchestrator.handle(msg)
     return {"ok": True}

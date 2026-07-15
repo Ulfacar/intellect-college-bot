@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,7 @@ class TelegramBotConfig(BaseModel):
     scenario: Literal["admission"] = "admission"
     token: str
     title: str = ""
+    webhook_secret: str = ""  # свой секрет на бота; проверяется через X-Telegram-Bot-Api-Secret-Token
 
 
 class ManagerConfig(BaseModel):
@@ -54,7 +55,24 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_bots: list[TelegramBotConfig] = []
+    # Allowlist тестировщиков Telegram-пилота. Пусто = пилот закрыт (доступ запрещён всем).
+    telegram_allowed_user_ids: list[int] = []
+    telegram_allowed_chat_ids: list[int] = []
     webhook_secret: str = ""
+
+    @field_validator("telegram_allowed_user_ids", "telegram_allowed_chat_ids", mode="before")
+    @classmethod
+    def _parse_id_list(cls, v):
+        """Принимаем и JSON `[1,2]`, и строку `1,2` / `1;2` из .env."""
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [int(x) for x in v.replace(";", ",").split(",") if x.strip()]
+        return v
 
     wappi_base_url: str = "https://wappi.pro"
     wappi_token: str = ""
