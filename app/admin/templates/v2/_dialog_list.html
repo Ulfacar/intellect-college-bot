@@ -1,0 +1,69 @@
+{% from "_owner_macros.html" import owner_dot, owner_chip %}
+{# Vertical dialog-row list: inbox (ждут ответа) | search | archive (owner §4 P0 fix). #}
+<div id="dialog-list-root" data-mode="{{ mode }}">
+  <div class="list-toolbar">
+    {% if mode == 'search' %}
+      <span class="meta">Поиск: «{{ query }}» — {{ cards|length }}</span>
+      <button type="button" class="list-tab" onclick="v2ClearSearch()">✕ Сбросить</button>
+    {% elif mode == 'archive' %}
+      <span class="meta">В архиве — {{ cards|length }}</span>
+    {% else %}
+      <span class="meta">Ждут ответа — {{ cards|length }}</span>
+    {% endif %}
+    <span style="flex:1"></span>
+    {% if mode != 'archive' %}
+    <button type="button" class="list-tab" onclick="selectVisibleV2Rows()">Выбрать все</button>
+    <button type="button" class="list-tab" onclick="clearV2Selection()">Снять выбор</button>
+    <button type="button" class="list-tab bulk-archive-v2" onclick="archiveSelectedV2()" disabled>
+      Архивировать (<span data-selected-count>0</span>)
+    </button>
+    {% endif %}
+  </div>
+
+  {% if not cards %}
+  <div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span>
+      {%- if mode == 'search' -%}Ничего не найдено по запросу.
+      {%- elif mode == 'archive' -%}Архив пуст.
+      {%- else -%}Никто не ждёт — всё отвечено.
+      {%- endif -%}
+    </span>
+  </div>
+  {% endif %}
+
+  {% for c in cards %}
+  <div class="dlg-row" tabindex="0" data-user-id="{{ c.user_id }}"
+       hx-get="/admin-v2/conversation/{{ c.user_id }}" hx-target="#workspace" hx-swap="innerHTML"
+       onclick="openV2Row(this, event)">
+    {% if mode != 'archive' %}
+    <label class="bulk-box" title="Выбрать" onclick="event.stopPropagation()">
+      <input type="checkbox" class="v2-bulk-checkbox" value="{{ c.user_id }}" onclick="event.stopPropagation()" onchange="updateV2Selection()">
+    </label>
+    {% endif %}
+    <span class="avatar" style="background: {{ c.avatar }}">{{ c.initials }}</span>
+    <div class="body">
+      <div class="top"><span class="name">{{ c.name }}</span></div>
+      <div class="preview">
+        {%- if c.last_text -%}
+          {{ {'client':'Клиент','bot':'Бот','manager':'Вы'}.get(c.last_sender, '') }}{% if c.last_sender %}: {% endif %}{{ c.last_text }}
+        {%- else -%}—{%- endif -%}
+      </div>
+      <div class="meta-row">
+        {{ owner_dot(c) }}
+        {{ owner_chip(c) }}
+        {% if c.needs_reply %}<span class="pill pill-urgent pill-sm">ваш ход</span>{% endif %}
+        {% if c.wait_level in ('warm', 'hot') %}<span class="pill pill-urgent pill-sm">ждёт {{ c.wait_label }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="side">
+      <span class="time">{{ c.time_label }}</span>
+      {% if mode == 'archive' %}
+      <button type="button" class="btn btn-ghost" style="padding:3px 9px;font-size:11px" onclick="v2Unarchive('{{ c.user_id }}', event)">Вернуть</button>
+      {% else %}
+      <button type="button" class="btn btn-ghost" style="padding:3px 9px;font-size:12px" title="Архивировать" onclick="v2ArchiveConv('{{ c.user_id }}', event)">В архив</button>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>

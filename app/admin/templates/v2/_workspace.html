@@ -1,0 +1,155 @@
+{% from "_owner_macros.html" import owner_pill %}
+{# Chat pane (middle) + right lead panel (owner §6 hierarchy). Every write action here
+   calls the EXISTING /admin/... endpoints (app/admin/router.py) via fetch — no business
+   logic is duplicated. On success we re-fetch this same partial (/admin-v2/conversation/
+   {user_id}) to reflect the new server state. #}
+<div class="chat-pane">
+  <div class="chat-head">
+    <button type="button" class="btn-info btn-back" title="Назад к списку" onclick="v2CloseMobileChat()">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <span class="avatar" style="background: {{ avatar }}">{{ initials }}</span>
+    <div class="who">
+      <div class="nm">{{ c.qualification.get('name') or c.phone }}</div>
+      <div class="sub">{{ c.phone }} · {{ c.channel or '—' }}</div>
+    </div>
+    <div class="chat-actions">
+      {{ owner_pill({'dialog_owner': dialog_owner, 'assigned_to': c.assigned_to}, size='sm') }}
+      <button type="button" class="btn-info" title="Карточка абитуриента" onclick="v2ToggleLeadPanel()">ⓘ</button>
+    </div>
+  </div>
+
+  {% if busy_by %}
+  <div class="error-state" style="margin:10px 16px;background:var(--mode-manager-soft);color:var(--mode-manager)">
+    ⚠ Диалог уже ведёт менеджер <b>&nbsp;{{ busy_by }}</b> — действуйте аккуратно
+  </div>
+  {% endif %}
+
+  <div class="msgs-scroll" id="v2-msgs-{{ c.user_id }}">
+    {% for m in c.messages %}
+    <div class="bubble-wrap {{ m.sender }}">
+      <div class="bubble-meta">
+        {{ {'client':'Клиент','bot':'Бот','manager':'Менеджер'}.get(m.sender, m.sender) }}{% if m.created_at %} · {{ m.created_at.strftime('%H:%M') }}{% endif %}
+        {% if m.status == 'pending' %}<span title="отправляется">⏳</span>
+        {% elif m.status == 'sent' %}<span title="отправлено">✓</span>
+        {% elif m.status == 'delivered' %}<span title="доставлено">✓✓</span>
+        {% elif m.status == 'failed' %}
+          <span title="не доставлено" style="color:var(--danger)">✗ не доставлено</span>
+          <button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="v2Resend('{{ c.user_id }}', {{ m.id }})">Повторить</button>
+        {% endif %}
+      </div>
+      <div class="bubble">{{ m.text }}</div>
+    </div>
+    {% else %}
+    <div class="empty-state"><span>Сообщений пока нет</span></div>
+    {% endfor %}
+  </div>
+
+  {# Show the first 4 quick replies; the rest hide behind «Ещё ▾» (owner §7). #}
+  <div class="quick-replies">
+    {% for label, text in quick_replies.items() %}
+    <button type="button" class="btn btn-ghost qr-btn{% if loop.index > 4 %} qr-extra{% endif %}" style="padding:4px 9px;font-size:12px" onclick="v2FillReply(this.dataset.t)" data-t="{{ text|e }}">{{ label }}</button>
+    {% endfor %}
+    {% if quick_replies|length > 4 %}
+    <button type="button" class="btn btn-ghost qr-more" style="padding:4px 9px;font-size:12px" onclick="v2ToggleQuickReplies(this)">Ещё ▾</button>
+    {% endif %}
+    <button type="button" class="btn btn-ghost" style="padding:4px 9px;font-size:12px" onclick="v2SuggestReply('{{ c.user_id }}', this)">✨ Предложить ответ</button>
+  </div>
+
+  <div class="composer-wrap">
+    <form class="composer" id="v2-composer-{{ c.user_id }}"
+          onsubmit="event.preventDefault(); v2SendMessage('{{ c.user_id }}', this); return false;">
+      <textarea name="text" rows="1" placeholder="Ответить клиенту…" autocomplete="off" aria-label="Ответить клиенту"></textarea>
+      <button class="btn-send" type="submit" aria-label="Отправить">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      </button>
+    </form>
+    <div class="composer-hint">Отправка ответа тоже переводит диалог на вас.</div>
+  </div>
+</div>
+
+<aside class="lead-pane" id="v2-lead-{{ c.user_id }}">
+  {# 1) СЛЕДУЮЩИЙ ШАГ — loudest, accent-soft (owner §6, order #1). #}
+  {% if c.manager_next_step %}
+  <div class="lead-sec">
+    <div class="lead-next-step">
+      <div class="label">Следующий шаг</div>
+      <div class="txt">{{ c.manager_next_step }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# 2) Кто ведёт — owner pill + Ответственный (order #2). #}
+  <div class="lead-sec">
+    <div class="label">Кто ведёт</div>
+    {{ owner_pill({'dialog_owner': dialog_owner, 'assigned_to': c.assigned_to}) }}
+    <div class="lead-row"><span class="k">Ответственный</span><span>{{ c.assigned_to or '—' }}</span></div>
+    <div style="margin-top:10px">
+      {% if dialog_owner == 'paused' or dialog_owner == 'manager' %}
+      <button type="button" class="btn btn-ghost btn-block" onclick="v2Release('{{ c.user_id }}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 0 1 4 4v2"/></svg>
+        Вернуть боту
+      </button>
+      {% else %}
+      <button type="button" class="btn btn-primary btn-block" onclick="v2Takeover('{{ c.user_id }}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2a8 8 0 0 1-7-4l-2-3"/></svg>
+        Взять диалог
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  {# 3) Статус лида — stage label (order #3). #}
+  <div class="lead-sec">
+    <div class="label">Статус лида</div>
+    <span class="chip">{{ stage_label }}</span>
+    <span class="meta" style="margin-left:6px">(временная стадия канбана)</span>
+  </div>
+
+  {# 4) Температура (order #4). #}
+  <div class="lead-sec">
+    <div class="label">Температура</div>
+    <span class="temp-tag temp-{{ c.lead_temperature }}">{{ {'new':'новый','warm':'тёплый','hot':'горячий'}.get(c.lead_temperature, c.lead_temperature) }}</span>
+  </div>
+
+  {# 5) КАРТОЧКА АБИТУРИЕНТА — qualification (order #5), visually SEPARATE from conversation info. #}
+  {% if qualification_rows %}
+  <div class="lead-sec">
+    <div class="label">Карточка абитуриента</div>
+    <div class="lead-qual-info" style="margin:0">
+      {% for k, v in qualification_rows %}
+      <div class="lead-row"><span class="k">{{ k }}</span><span>{{ v }}</span></div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# 6) AI-бриф (order #6). #}
+  {% if c.ai_summary or c.escalation_reason %}
+  <div class="lead-sec">
+    <div class="label">AI-бриф</div>
+    {% if c.ai_summary %}<div class="lead-row"><span class="k">Контекст</span><span>{{ c.ai_summary }}</span></div>{% endif %}
+    {% if c.escalation_reason %}<div class="lead-row"><span class="k">Почему важно</span><span>{{ c.escalation_reason }}</span></div>{% endif %}
+  </div>
+  {% endif %}
+
+  {# 7) История / тех-детали — collapsible, lower block (order #7). #}
+  <div class="lead-sec lead-history">
+    <details>
+      <summary>Исход и тех-детали</summary>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        {% for key, label in outcomes %}
+        <button type="button" class="btn {% if c.outcome == key %}btn-primary{% else %}btn-ghost{% endif %}"
+                style="padding:5px 10px;font-size:12px;width:auto" onclick="v2Outcome('{{ c.user_id }}', '{{ key }}')">{{ label }}</button>
+        {% endfor %}
+      </div>
+      <div class="lead-row" style="margin-top:8px"><span class="k">user_id</span><span class="meta">{{ c.user_id }}</span></div>
+      <div class="lead-row"><span class="k">funnel</span><span class="meta">{{ c.funnel or '—' }}</span></div>
+      <div class="lead-row"><span class="k">bot_id</span><span class="meta">{{ c.bot_id or '—' }}</span></div>
+    </details>
+  </div>
+
+  <div class="lead-sec">
+    <button type="button" class="btn btn-ghost btn-block" onclick="v2ArchiveConv('{{ c.user_id }}')">Архивировать диалог</button>
+  </div>
+</aside>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intellect College — вход (v2 прототип)</title>
+  {% include "_style.html" %}
+  <style>
+    body.v2.login-body { height: 100vh; display: grid; place-items: center; }
+    .login-card { width: 340px; background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--r-lg); padding: 28px; box-shadow: var(--shadow); }
+    .login-card .logo { width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 14px;
+                         background: linear-gradient(135deg,#2563EB,#059669); display: grid; place-items: center;
+                         color: #fff; font-weight: 800; font-size: 20px; }
+    .login-card h1 { font-size: 18px; text-align: center; margin: 0 0 4px; }
+    .login-card .sub { text-align: center; color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+    .login-card label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 6px; }
+    .login-card input { width: 100%; }
+    .login-card button.btn-primary { margin-top: 18px; }
+    .login-card .err { margin-top: 14px; color: var(--danger); font-size: 13px; text-align: center; }
+    .proto-badge { text-align: center; margin-bottom: 14px; }
+    .proto-badge span { background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
+                         padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: .04em; }
+    .demo { margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--border); }
+    .demo-l { text-align: center; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    .demo-btns { display: flex; flex-direction: column; gap: 8px; }
+    .demo-btns button { margin: 0; }
+  </style>
+</head>
+<body class="v2 login-body">
+  <div>
+    <div class="proto-badge"><span>v2 прототип</span></div>
+    <form class="login-card" method="post" action="/admin-v2/login">
+      <div class="logo">I</div>
+      <h1>Intellect College — панель</h1>
+      <p class="sub">Войдите под своим логином</p>
+      <label for="login">Логин</label>
+      <input id="login" name="login" autocomplete="username" autofocus>
+      <label for="password">Пароль</label>
+      <input id="password" name="password" type="password" autocomplete="current-password">
+      <button class="btn btn-primary" type="submit">Войти</button>
+      {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    </form>
+    {% if demo_managers %}
+    <div class="login-card demo" style="margin-top: 14px">
+      <div class="demo-l">⚡ Быстрый вход (демо)</div>
+      <div class="demo-btns">
+        {% for m in demo_managers %}
+        <form method="post" action="/admin-v2/login/demo">
+          <input type="hidden" name="login" value="{{ m.login }}">
+          <button class="btn btn-ghost btn-block" type="submit">Войти как {{ m.name }}</button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

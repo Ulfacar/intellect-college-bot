@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Intellect College — приёмная (v2 прототип)</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  {% include "_style.html" %}
+</head>
+<body class="v2">
+  <div class="app-shell">
+    <nav class="nav">
+      <div class="nav-brand">
+        <span class="logo">I</span>
+        <span>Intellect College<small>v2 прототип</small></span>
+      </div>
+      <button type="button" class="nav-item active" data-view="list" onclick="showView('list')">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Инбокс <span class="nav-badge" id="nav-badge" hidden>0</span>
+      </button>
+      <button type="button" class="nav-item" data-view="kanban" onclick="showView('kanban')">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="10" rx="1"/></svg>
+        Канбан (legacy)
+      </button>
+      <button type="button" class="nav-item" data-view="archive" onclick="showView('archive')">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/></svg>
+        Архив
+      </button>
+      <div class="nav-spacer"></div>
+      <a class="nav-item" href="/admin" target="_blank" rel="noopener">← Классический /admin</a>
+      <form method="post" action="/admin-v2/logout" style="width:100%">
+        <button class="nav-item" type="submit" style="width:100%">Выйти</button>
+      </form>
+      <div class="nav-note">Прототип нового интерфейса. Классический /admin работает как раньше.</div>
+    </nav>
+
+    <div class="main-col">
+      <header class="topbar">
+        <span class="section-title" id="section-title">Инбокс</span>
+        <span class="spacer"></span>
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input type="search" name="q" placeholder="Поиск по имени или номеру…" autocomplete="off" aria-label="Поиск диалогов"
+                 hx-get="/admin-v2/search" hx-trigger="keyup changed delay:300ms, search"
+                 hx-target="#dialog-list" hx-swap="innerHTML" onfocus="v2SearchFocused()">
+        </div>
+        <div class="me">
+          <span>{{ manager.name if manager else 'Менеджер' }}</span>
+          <span class="av">👤</span>
+        </div>
+      </header>
+
+      <div id="view-list" class="workspace-grid">
+        <section class="main-list" id="dialog-list" hx-get="/admin-v2/inbox" hx-trigger="load" hx-swap="innerHTML"></section>
+        <div class="main-workspace" id="workspace">
+          <div class="empty-state" style="grid-column:1/-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Выберите диалог слева,<br>чтобы открыть переписку</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-kanban" class="kanban-wrap" hidden>
+        {# Single legacy-board plaque lives HERE in the Канбан header (owner §4). It is
+           deliberately OUTSIDE #kanban-root so the 15s board auto-refresh (which swaps
+           the board's outerHTML) can't re-inject a duplicate on every tick. #}
+        <div class="legacy-note">
+          ⚠️ legacy-board (временный) — старые 7 колонок канбана для сверки; не связаны с
+          11 каноническими статусами лида и будут заменены отдельной доской позже.
+        </div>
+        <div id="kanban-root" hx-get="/admin-v2/board/{{ funnels[0][0] if funnels else 'admission' }}" hx-trigger="load" hx-swap="innerHTML"></div>
+      </div>
+    </div>
+  </div>
+
+  {# Kanban dialog DRAWER (desktop): a card click slides this in over the board and
+     loads the SAME conversation partial from /admin-v2/conversation/{id}. On mobile a
+     card opens the inbox fullscreen chat instead (see openV2Kanban). #}
+  <div id="kanban-drawer" class="kanban-drawer" aria-hidden="true">
+    <div class="drawer-backdrop" onclick="v2CloseDrawer()"></div>
+    <div class="drawer-panel" role="dialog" aria-label="Диалог">
+      <div class="drawer-head">
+        <button type="button" class="btn-info" onclick="v2CloseDrawer()" aria-label="Закрыть">✕</button>
+      </div>
+      <div id="kanban-drawer-body" class="kanban-drawer-body"></div>
+    </div>
+  </div>
+
+  <div class="lead-scrim" onclick="document.body.classList.remove('lead-open')" aria-hidden="true"></div>
+  <div id="toast-stack" aria-live="polite"></div>
+
+  <script>
+    var V2_DEFAULT_FUNNEL = "{{ funnels[0][0] if funnels else 'admission' }}";
+
+    /* ---------------- toast (owner §4 P0: no silent empty catch) ---------------- */
+    function v2Toast(msg) {
+      var stack = document.getElementById('toast-stack');
+      if (!stack) return;
+      var el = document.createElement('div');
+      el.className = 'toast toast--error';
+      el.textContent = msg || 'Не удалось — проверьте связь и повторите.';
+      stack.appendChild(el);
+      setTimeout(function () { el.remove(); }, 4200);
+    }
+    function v2ToastOk(msg) {
+      var stack = document.getElementById('toast-stack');
+      if (!stack || !msg) return;
+      var el = document.createElement('div');
+      el.className = 'toast toast--ok';
+      el.textContent = msg;
+      stack.appendChild(el);
+      setTimeout(function () { el.remove(); }, 2600);
+    }
+    document.body.addEventListener('htmx:responseError', function () { v2Toast(); });
+    document.body.addEventListener('htmx:sendError', function () { v2Toast(); });
+
+    /* ---------------- nav / view switching ---------------- */
+    function showView(view) {
+      v2CloseDrawer();
+      document.body.classList.remove('mobile-chat-open');
+      document.body.classList.remove('lead-open');
+      document.querySelectorAll('.nav-item[data-view]').forEach(function (b) {
+        b.classList.toggle('active', b.dataset.view === view);
+      });
+      document.getElementById('view-list').hidden = (view === 'kanban');
+      document.getElementById('view-kanban').hidden = (view !== 'kanban');
+      var titles = { list: 'Инбокс', archive: 'Архив', kanban: 'Канбан (legacy)' };
+      document.getElementById('section-title').textContent = titles[view] || 'Инбокс';
+      var s = document.querySelector('.search input'); if (s) s.value = '';
+      if (view === 'kanban') {
+        if (window.htmx) htmx.ajax('GET', '/admin-v2/board/' + V2_DEFAULT_FUNNEL, { target: '#kanban-root', swap: 'innerHTML' });
+      } else if (view === 'archive') {
+        if (window.htmx) htmx.ajax('GET', '/admin-v2/archive', { target: '#dialog-list', swap: 'innerHTML' });
+      } else {
+        if (window.htmx) htmx.ajax('GET', '/admin-v2/inbox', { target: '#dialog-list', swap: 'innerHTML' });
+      }
+    }
+    function v2SearchFocused() {
+      if (!document.getElementById('view-list').hidden) return;
+      showView('list');
+    }
+    function v2ClearSearch() {
+      var s = document.querySelector('.search input'); if (s) s.value = '';
+      showView('list');
+    }
+    function v2RefreshList() {
+      var root = document.getElementById('dialog-list-root');
+      var mode = root ? root.getAttribute('data-mode') : 'inbox';
+      var url = '/admin-v2/inbox';
+      if (mode === 'archive') url = '/admin-v2/archive';
+      else if (mode === 'search') {
+        var s = document.querySelector('.search input');
+        url = '/admin-v2/search?q=' + encodeURIComponent((s && s.value.trim()) || '');
+      }
+      if (window.htmx) htmx.ajax('GET', url, { target: '#dialog-list', swap: 'innerHTML' });
+      _v2PollStats();
+    }
+
+    /* ---------------- dialog row selection + mobile fullscreen (owner §4 P0) ------- */
+    function openV2Row(el) {
+      document.querySelectorAll('.dlg-row.active').forEach(function (r) { r.classList.remove('active'); });
+      el.classList.add('active');
+      if (window.matchMedia('(max-width: 860px)').matches) {
+        document.body.classList.add('mobile-chat-open');
+      }
+    }
+    function v2CloseMobileChat() {
+      document.body.classList.remove('mobile-chat-open');
+      document.body.classList.remove('lead-open');
+    }
+    function _v2IsMobile() { return window.matchMedia('(max-width: 860px)').matches; }
+    function v2ToggleLeadPanel() {
+      // Context-aware: inside the kanban drawer toggle the drawer's own lead overlay;
+      // otherwise the inbox 3-pane / mobile slide-in via body.lead-open.
+      var drawer = document.getElementById('kanban-drawer');
+      if (drawer && drawer.classList.contains('open') && !_v2IsMobile()) {
+        drawer.classList.toggle('lead-shown');
+      } else {
+        document.body.classList.toggle('lead-open');
+      }
+    }
+    function v2CloseDrawer() {
+      var d = document.getElementById('kanban-drawer');
+      if (d) { d.classList.remove('open'); d.classList.remove('lead-shown'); }
+    }
+    function openV2Kanban(userId) {
+      var url = '/admin-v2/conversation/' + encodeURIComponent(userId);
+      if (_v2IsMobile()) {
+        // Mobile: reuse the SAME inbox fullscreen chat (no drawer on phones).
+        showView('list');
+        if (window.htmx) htmx.ajax('GET', url, { target: '#workspace', swap: 'innerHTML' });
+        document.body.classList.add('mobile-chat-open');
+        return;
+      }
+      // Desktop: slide-in drawer over the board, manager stays on the kanban.
+      if (window.htmx) htmx.ajax('GET', url, { target: '#kanban-drawer-body', swap: 'innerHTML' });
+      var d = document.getElementById('kanban-drawer');
+      if (d) { d.classList.add('open'); d.classList.remove('lead-shown'); }
+    }
+
+    /* ---------------- bulk select (dialog list) ---------------- */
+    function updateV2Selection() {
+      var root = document.getElementById('dialog-list-root');
+      if (!root) return;
+      var count = root.querySelectorAll('.v2-bulk-checkbox:checked').length;
+      var counter = root.querySelector('[data-selected-count]');
+      var bulk = root.querySelector('.bulk-archive-v2');
+      if (counter) counter.textContent = String(count);
+      if (bulk) bulk.disabled = count === 0;
+    }
+    function selectVisibleV2Rows() {
+      document.querySelectorAll('#dialog-list .dlg-row .v2-bulk-checkbox').forEach(function (box) { box.checked = true; });
+      updateV2Selection();
+    }
+    function clearV2Selection() {
+      document.querySelectorAll('#dialog-list .v2-bulk-checkbox').forEach(function (box) { box.checked = false; });
+      updateV2Selection();
+    }
+    async function archiveSelectedV2() {
+      var ids = Array.from(document.querySelectorAll('#dialog-list .v2-bulk-checkbox:checked')).map(function (b) { return b.value; });
+      if (!ids.length) return;
+      if (!confirm('Заархивировать ' + ids.length + ' диалог(ов)?')) return;
+      var body = new URLSearchParams();
+      ids.forEach(function (id) { body.append('user_ids', id); });
+      try {
+        var r = await fetch('/admin/conversations/archive', {
+          method: 'POST',
+          headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: body.toString(),
+        });
+        if (!r.ok) { v2Toast(); return; }
+        v2RefreshList();
+      } catch (_) { v2Toast(); }
+    }
+
+    /* ---------------- write actions: reuse EXISTING /admin/... endpoints ----------- */
+    async function v2Post(url) {
+      try {
+        var r = await fetch(url, { method: 'POST', headers: { 'HX-Request': 'true' } });
+        if (!r.ok) { v2Toast(); return false; }
+        return true;
+      } catch (_) { v2Toast(); return false; }
+    }
+    async function v2PostBody(url, body) {
+      try {
+        var r = await fetch(url, {
+          method: 'POST',
+          headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: body,
+        });
+        if (!r.ok) { v2Toast(); return false; }
+        return true;
+      } catch (_) { v2Toast(); return false; }
+    }
+    // The open conversation lives EITHER in the inbox 3-pane (#workspace) OR in the
+    // kanban drawer (#kanban-drawer-body) — never both. These helpers target whichever
+    // is active so the shared conversation partial works in either place.
+    function _v2ConvContainer() {
+      var d = document.getElementById('kanban-drawer');
+      if (d && d.classList.contains('open')) return document.getElementById('kanban-drawer-body');
+      return document.getElementById('workspace');
+    }
+    function _v2ComposerInput() {
+      var c = _v2ConvContainer();
+      return c ? c.querySelector('form.composer textarea[name="text"]') : null;
+    }
+    function v2RefreshConversation(userId) {
+      var c = _v2ConvContainer();
+      var target = (c && c.id === 'kanban-drawer-body') ? '#kanban-drawer-body' : '#workspace';
+      if (window.htmx) htmx.ajax('GET', '/admin-v2/conversation/' + encodeURIComponent(userId), { target: target, swap: 'innerHTML' });
+    }
+    async function v2Takeover(userId) {
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/takeover')) v2RefreshConversation(userId);
+    }
+    async function v2Release(userId) {
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/release')) v2RefreshConversation(userId);
+    }
+    async function v2SendMessage(userId, form) {
+      var fd = new FormData(form);
+      var body = new URLSearchParams();
+      fd.forEach(function (v, k) { body.append(k, v); });
+      var ok = await v2PostBody('/admin/conversation/' + encodeURIComponent(userId) + '/send', body.toString());
+      if (ok) { form.reset(); v2RefreshConversation(userId); v2RefreshList(); v2ToastOk('Ответ отправлен'); }
+    }
+    async function v2Outcome(userId, outcome) {
+      var ok = await v2PostBody('/admin/conversation/' + encodeURIComponent(userId) + '/outcome', 'outcome=' + encodeURIComponent(outcome));
+      if (ok) v2RefreshConversation(userId);
+    }
+    async function v2Resend(userId, msgId) {
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/resend/' + msgId)) v2RefreshConversation(userId);
+    }
+    async function v2ArchiveConv(userId, ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      if (!confirm('Заархивировать этот диалог?')) return;
+      var ok = await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/archive');
+      if (ok) {
+        var drawer = document.getElementById('kanban-drawer');
+        if (drawer && drawer.classList.contains('open')) {
+          // Archived from the kanban drawer: close it and refresh the board.
+          v2CloseDrawer();
+          if (window.htmx) htmx.ajax('GET', '/admin-v2/board/' + V2_DEFAULT_FUNNEL, { target: '#kanban-root', swap: 'innerHTML' });
+        } else {
+          v2RefreshList();
+          var ws = document.getElementById('workspace');
+          if (ws && ws.querySelector('#v2-composer-' + CSS.escape(userId))) {
+            ws.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><span>Диалог архивирован</span></div>';
+          }
+          v2CloseMobileChat();
+        }
+        v2ToastOk('Диалог в архиве');
+      }
+    }
+    async function v2Unarchive(userId, ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/unarchive')) v2RefreshList();
+    }
+    function v2ToggleQuickReplies(btn) {
+      var wrap = btn.closest('.quick-replies');
+      if (!wrap) return;
+      var open = wrap.classList.toggle('qr-open');
+      btn.textContent = open ? 'Скрыть ▲' : 'Ещё ▾';
+    }
+    function v2FillReply(text) {
+      var inp = _v2ComposerInput();
+      if (!inp) return;
+      inp.value = inp.value ? (inp.value.trim() + ' ' + text) : text;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.focus();
+    }
+    async function v2SuggestReply(userId, btn) {
+      var inp = _v2ComposerInput();
+      if (!inp) return;
+      var old = btn.textContent; btn.textContent = '…думаю'; btn.disabled = true;
+      try {
+        var r = await fetch('/admin/conversation/' + encodeURIComponent(userId) + '/suggest', { method: 'POST' });
+        if (!r.ok) { v2Toast(); } else {
+          inp.value = (await r.text()).trim();
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.focus();
+        }
+      } catch (_) { v2Toast(); }
+      btn.textContent = old; btn.disabled = false;
+    }
+
+    /* ---------------- composer autosize + Enter-to-send ---------------- */
+    document.addEventListener('input', function (e) {
+      if (e.target.matches('form.composer textarea[name="text"]')) {
+        e.target.style.height = 'auto';
+        e.target.style.height = e.target.scrollHeight + 'px';
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      var inp = e.target.closest && e.target.closest('form.composer textarea[name="text"]');
+      if (!inp || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+      e.preventDefault();
+      var form = inp.closest('form');
+      if (form) form.requestSubmit();
+    });
+    // Esc closes the kanban drawer (or its lead overlay first).
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      var d = document.getElementById('kanban-drawer');
+      if (d && d.classList.contains('open')) {
+        if (d.classList.contains('lead-shown')) { d.classList.remove('lead-shown'); }
+        else { v2CloseDrawer(); }
+      }
+    });
+    // Enter (or Space) on a focused dialog row opens it — keyboard parity with a click.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var row = e.target.closest && e.target.closest('.dlg-row');
+      if (!row || row.querySelector('.v2-bulk-checkbox') === e.target) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      row.click();
+    });
+
+    /* ---------------- legacy kanban: drag-and-drop with revert + toast on fail ----- */
+    var _v2Dragging = false;
+    function initV2KanbanDnD() {
+      if (typeof Sortable === 'undefined') return;
+      document.querySelectorAll('#view-kanban .kb-col-cards').forEach(function (col) {
+        if (col._sortable) return;
+        col._sortable = Sortable.create(col, {
+          group: 'v2board', draggable: '.kb-card', animation: 200, ghostClass: 'kb-ghost',
+          onStart: function () { _v2Dragging = true; window.__v2Dragging = true; },
+          onEnd: onV2CardMoved,
+        });
+      });
+    }
+    async function onV2CardMoved(evt) {
+      _v2Dragging = false; window.__v2Dragging = false;
+      var card = evt.item;
+      var uid = card.getAttribute('data-uid');
+      var toCol = evt.to.closest('.kb-col');
+      var stage = toCol && toCol.getAttribute('data-col');
+      var boardRoot = evt.to.closest('[data-funnel]');
+      var funnel = boardRoot && boardRoot.getAttribute('data-funnel');
+      var failed = false;
+      if (uid && stage && evt.to !== evt.from) {
+        try {
+          var r = await fetch('/admin/conversation/' + encodeURIComponent(uid) + '/stage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
+            body: 'stage=' + encodeURIComponent(stage),
+          });
+          if (!r.ok) failed = true;
+        } catch (_) { failed = true; }
+      }
+      if (failed) v2Toast('Не удалось перенести карточку — проверьте связь и повторите.');
+      // Reload from server either way: on failure the stage never changed server-side,
+      // so this naturally puts the card back where it was (no silent/local-only revert).
+      if (funnel && window.htmx) htmx.ajax('GET', '/admin-v2/board/' + funnel, { target: '#kb-board-' + funnel, swap: 'outerHTML' });
+    }
+    document.body.addEventListener('htmx:afterSettle', function (e) {
+      if (!_v2Dragging && !window.__v2Dragging) initV2KanbanDnD();
+      // Chat should open on the NEWEST message, not the oldest. Only when a conversation
+      // container (inbox workspace or the kanban drawer) was just swapped — not on the
+      // periodic inbox-list refresh — so a manager scrolled up isn't yanked back down.
+      if (e.target && (e.target.id === 'workspace' || e.target.id === 'kanban-drawer-body')) {
+        var _m = e.target.querySelector('.msgs-scroll');
+        if (_m) _m.scrollTop = _m.scrollHeight;
+      }
+    });
+    initV2KanbanDnD();
+
+    /* ---------------- nav badge (waiting count) polling + inbox auto-refresh ---------- */
+    var _v2LastWaiting = null;
+    function _v2InboxListVisible() {
+      var root = document.getElementById('dialog-list-root');
+      return document.getElementById('view-list') && !document.getElementById('view-list').hidden
+             && root && root.getAttribute('data-mode') === 'inbox';
+    }
+    function _v2HasSelection() {
+      return document.querySelectorAll('#dialog-list .v2-bulk-checkbox:checked').length > 0;
+    }
+    function _v2SearchFocused() {
+      var s = document.querySelector('.search input');
+      return s && document.activeElement === s;
+    }
+    async function _v2PollStats() {
+      try {
+        var r = await fetch('/admin-v2/stats', { headers: { 'HX-Request': 'true' } });
+        if (!r.ok) return;
+        var s = await r.json(), n = s.waiting || 0;
+        var badge = document.getElementById('nav-badge');
+        if (badge) { badge.textContent = n; badge.hidden = (n === 0); }
+        // Keep the inbox list in sync too (badge alone wasn't enough). Only refresh the
+        // live inbox view, and never while the manager is selecting rows or searching.
+        if (_v2LastWaiting !== null && n !== _v2LastWaiting
+            && _v2InboxListVisible() && !_v2HasSelection() && !_v2SearchFocused()) {
+          v2RefreshList();
+        }
+        _v2LastWaiting = n;
+      } catch (_) { /* сеть моргнула — молча ждём следующего тика */ }
+    }
+    setInterval(_v2PollStats, 12000); _v2PollStats();
+  </script>
+</body>
+</html>

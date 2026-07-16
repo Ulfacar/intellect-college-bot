@@ -1,0 +1,319 @@
+{# Shared stylesheet for /admin-v2 (Increment 8A prototype). Included via {% include %} —
+   no StaticFiles mount, per the isolation brief. Extends the SAME token names /admin
+   already uses (--bg #F1F5F9, --surface, --border, --text #0F172A, --muted, --accent
+   #2563EB, --accent-soft, Fira Sans/Code) and adds the new semantic MODE colors:
+   bot=green, manager=amber, paused=grey; red stays reserved for urgency/errors/danger. #}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* DARK operator-console theme — the DEFAULT look of /admin-v2 (owner-approved),
+       NOT OS-dependent. The classic light /admin is a separate untouched app. Blue
+       accent kept; semantic mode colors (green/amber/grey) and urgency red tuned for
+       readability on dark surfaces (≥4.5:1 body text). */
+    color-scheme: dark;
+    --bg: #0B1220; --surface: #111A2C; --surface-2: #0F1727; --elev: #141F35;
+    --border: #223049; --border-2: #2E3F5C;
+    --text: #E7ECF5; --muted: #93A2BE; --faint: #5D6D8C;
+    --accent: #4D8DFF; --accent-2: #2F6FE0; --accent-soft: rgba(77,141,255,.16);
+    --mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font: 'Fira Sans', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+    /* Semantic mode colors — brightened for dark bg (soft tints stay behind text). */
+    --mode-bot: #34D399; --mode-bot-soft: rgba(52,211,153,.14);
+    --mode-manager: #FBBF24; --mode-manager-soft: rgba(251,191,36,.15);
+    --mode-paused: #94A3B8; --mode-paused-soft: rgba(148,163,184,.16);
+    --danger: #F87171; --danger-soft: rgba(248,113,113,.15);
+
+    /* Spacing scale 4/8/12/16/20/24/32 */
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+    /* Radii 8/12/16 */
+    --r-sm: 8px; --r-md: 12px; --r-lg: 16px;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 10px 28px rgba(0,0,0,.45);
+    --t: 160ms cubic-bezier(.4,0,.2,1);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  /* Global guard: the `hidden` ATTRIBUTE must beat explicit display rules on the same
+     element (e.g. .kanban-wrap{display:flex}, .workspace-grid{display:grid}). Without
+     this, #view-kanban[hidden] stayed visible and stacked under the inbox. (FIX 1) */
+  [hidden] { display: none !important; }
+  body.v2 { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font);
+            font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .v2 ::selection { background: var(--accent-soft); }
+
+  /* ---------------- App shell: left nav + topbar + content ---------------- */
+  .app-shell { display: grid; grid-template-columns: 216px 1fr; height: 100vh; height: 100dvh; }
+  .nav { background: var(--surface); border-right: 1px solid var(--border);
+         display: flex; flex-direction: column; padding: var(--sp-3) var(--sp-2); gap: 2px; }
+  .nav-brand { display: flex; align-items: center; gap: 9px; padding: var(--sp-5) var(--sp-2) var(--sp-4); font-weight: 700; line-height: 1.35; }
+  .nav-brand .logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg,#2563EB,#059669);
+                      display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 13px; flex-shrink: 0; }
+  .nav-brand small { display: block; color: var(--muted); font-weight: 500; font-size: 11px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 10px; border-radius: var(--r-sm);
+              color: var(--muted); text-decoration: none; font-weight: 600; font-size: 13.5px; line-height: 1.4;
+              border-left: 3px solid transparent; cursor: pointer; background: transparent; border-top: none;
+              border-right: none; border-bottom: none; font: inherit; text-align: left; width: 100%; }
+  .nav-item:hover { background: var(--surface-2); color: var(--text); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); border-left-color: var(--accent); font-weight: 700; }
+  .nav-item .ic { width: 17px; height: 17px; flex-shrink: 0; }
+  .nav-badge { margin-left: auto; background: #DC2626; color: #fff; font-family: var(--mono); font-size: 12px;
+               font-weight: 700; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: grid; place-items: center; }
+  .nav-badge[hidden] { display: none; }
+  .nav-spacer { flex: 1; }
+  .nav-note { padding: var(--sp-2) var(--sp-3); color: var(--faint); font-size: 11px; line-height: 1.5; }
+
+  .main-col { display: flex; flex-direction: column; min-width: 0; height: 100vh; height: 100dvh; }
+  .topbar { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-4); height: 52px;
+            background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .topbar .section-title { font-weight: 700; font-size: 14px; white-space: nowrap; line-height: 1.4; letter-spacing: .01em; }
+  .topbar .spacer { flex: 1; }
+  .search { position: relative; display: flex; align-items: center; }
+  .search svg { position: absolute; left: 10px; width: 14px; height: 14px; color: var(--faint); pointer-events: none; }
+  .search input { width: 220px; padding: 7px 10px 7px 32px; background: var(--surface-2); color: var(--text);
+                  border: 1px solid var(--border-2); border-radius: var(--r-sm); font: inherit; font-size: 13px;
+                  transition: border-color var(--t), box-shadow var(--t); }
+  .search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .me { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 500; }
+  .me .av { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border-2);
+            display: grid; place-items: center; }
+
+  /* 2 direct children (list + workspace); the lead pane lives INSIDE .main-workspace,
+     which splits 1fr/300px itself — so this grid must be 2 columns, not 3, or a dead
+     300px strip appears on desktop. The list is adaptive: grows a little on wide screens
+     instead of a fixed 340px (owner §6). */
+  .workspace-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 400px) 1fr; }
+  .main-list { border-right: 1px solid var(--border); overflow-y: auto; min-width: 0; }
+  .main-workspace { display: grid; grid-template-columns: 1fr 300px; min-width: 0; min-height: 0; }
+  .main-workspace.empty { display: flex; }
+  .chat-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .lead-pane { border-left: 1px solid var(--border); overflow-y: auto; min-height: 0; }
+
+  /* ---------------- Section headers / meta ---------------- */
+  .section-head { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+                  font-weight: 700; padding: var(--sp-3) var(--sp-3) var(--sp-2); }
+  .meta { font-size: 12.5px; color: var(--muted); }
+
+  /* ---------------- Pills (mode) + urgency + chips ---------------- */
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+          padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+  .pill-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .pill-bot { background: var(--mode-bot-soft); color: var(--mode-bot); }
+  .pill-bot .pill-dot { background: var(--mode-bot); }
+  .pill-manager { background: var(--mode-manager-soft); color: var(--mode-manager); }
+  .pill-manager .pill-dot { background: var(--mode-manager); }
+  .pill-paused { background: var(--mode-paused-soft); color: var(--mode-paused); }
+  .pill-paused .pill-dot { background: var(--mode-paused); }
+  .pill-sm { font-size: 12px; padding: 2px 8px; }
+  .pill-urgent { background: var(--danger-soft); color: var(--danger); }
+
+  .row-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .row-dot-bot { background: var(--mode-bot); }
+  .row-dot-manager { background: var(--mode-manager); }
+  .row-dot-paused { background: var(--mode-paused); }
+
+  .chip { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 2px 8px;
+          border-radius: 6px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+  .chip-owner.chip-bot { color: var(--mode-bot); background: var(--mode-bot-soft); border-color: transparent; }
+  .chip-owner.chip-manager { color: var(--mode-manager); background: var(--mode-manager-soft); border-color: transparent; }
+  .chip-owner.chip-paused { color: var(--mode-paused); background: var(--mode-paused-soft); border-color: transparent; }
+
+  /* ---------------- Dialog list rows ---------------- */
+  .list-toolbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
+                  border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .list-tab { background: transparent; border: 1px solid transparent; color: var(--muted); font: inherit;
+              font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: var(--r-sm); cursor: pointer; }
+  .list-tab.active { background: var(--accent-soft); color: var(--accent); }
+  .list-tab:hover { background: var(--surface-2); }
+
+  .dlg-row { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); height: 72px;
+             border-bottom: 1px solid var(--border); cursor: pointer; position: relative;
+             transition: background var(--t); }
+  .dlg-row:hover, .dlg-row:focus-visible { background: var(--surface-2); outline: none; }
+  .dlg-row.active { background: var(--accent-soft); }
+  .dlg-row .avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+                      font-weight: 700; font-size: 13px; color: #fff; }
+  .dlg-row .body { min-width: 0; flex: 1; }
+  .dlg-row .top { display: flex; align-items: center; gap: 7px; }
+  .dlg-row .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dlg-row .preview { color: var(--muted); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dlg-row .meta-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 12.5px; color: var(--faint); }
+  .dlg-row .meta-row .owner-chip-wrap { display: inline-flex; }
+  .dlg-row .side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-left: auto; flex-shrink: 0; }
+  .dlg-row .time { font-size: 11px; color: var(--faint); }
+  .dlg-row .urgency { font-size: 12px; font-weight: 700; color: var(--danger); background: var(--danger-soft);
+                       padding: 2px 7px; border-radius: 20px; }
+  .dlg-row .bulk-box { margin-right: 2px; }
+
+  /* ---------------- Chat: bubbles + composer ---------------- */
+  .chat-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+               border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .chat-head .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+                        font-weight: 700; font-size: 13px; color: #fff; flex-shrink: 0; }
+  .chat-head .who .nm { font-weight: 700; font-size: 15px; }
+  .chat-head .who .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .chat-actions { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+  .btn-info { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border-2); background: var(--surface);
+              display: grid; place-items: center; cursor: pointer; color: var(--muted); }
+  .btn-back { display: none; }
+
+  .msgs-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: 10px; }
+  .bubble-wrap { max-width: 78%; }
+  .bubble-wrap.client { align-self: flex-start; }
+  .bubble-wrap.bot, .bubble-wrap.manager { align-self: flex-end; }
+  .bubble-meta { font-size: 12.5px; color: var(--faint); margin: 0 4px 3px; font-weight: 600; }
+  .bubble-wrap.bot .bubble-meta, .bubble-wrap.manager .bubble-meta { text-align: right; }
+  .bubble { padding: 10px 13px; border-radius: var(--r-md); font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
+  .bubble-wrap.client .bubble { background: var(--surface-2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .bubble-wrap.bot .bubble { background: var(--mode-bot-soft); border: 1px solid rgba(52,211,153,.30); color: #A7F3D0; border-bottom-right-radius: 4px; }
+  .bubble-wrap.manager .bubble { background: var(--mode-manager-soft); border: 1px solid rgba(251,191,36,.30); color: #FDE68A; border-bottom-right-radius: 4px; }
+
+  .composer-wrap { border-top: 1px solid var(--border); flex-shrink: 0; background: var(--surface); }
+  .composer { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); align-items: flex-end; }
+  .composer textarea { flex: 1; padding: 10px 13px; background: var(--surface-2); color: var(--text);
+                        border: 1px solid var(--border-2); border-radius: 10px; font: inherit; font-size: 15px;
+                        min-height: 44px; max-height: 168px; line-height: 1.4; resize: none; overflow-y: auto; }
+  .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .btn-send { width: 44px; height: 44px; border-radius: 10px; background: var(--accent-2); color: #fff; border: none;
+              display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+  .btn-send:hover { background: #2560C4; }
+  .composer-hint { padding: 0 var(--sp-4) var(--sp-3); color: var(--faint); font-size: 11px; }
+  .quick-replies { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 var(--sp-4) var(--sp-2); }
+  .quick-replies .qr-extra { display: none; }
+  .quick-replies.qr-open .qr-extra { display: inline-flex; }
+
+  /* ---------------- Lead panel (owner §6 hierarchy) ---------------- */
+  .lead-sec { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
+  .lead-sec:last-child { border-bottom: none; }
+  .lead-sec .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
+  .lead-next-step { background: var(--accent-soft); border: 1px solid rgba(77,141,255,.30); border-radius: var(--r-md);
+                     padding: var(--sp-3); }
+  .lead-next-step .label { color: var(--accent); }
+  .lead-next-step .txt { font-size: 15px; font-weight: 600; line-height: 1.4; }
+  .lead-row { display: grid; grid-template-columns: 118px 1fr; gap: 8px; padding: 5px 0; font-size: 13px; }
+  .lead-row .k { color: var(--muted); }
+  .temp-tag { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+  .temp-new { background: var(--surface-2); color: var(--muted); }
+  .temp-warm { background: var(--mode-manager-soft); color: var(--mode-manager); }
+  .temp-hot { background: var(--danger-soft); color: var(--danger); }
+  .lead-conv-info { background: var(--surface-2); border-radius: var(--r-md); }
+  .lead-qual-info { border: 1px dashed var(--border-2); border-radius: var(--r-md); margin: 0 var(--sp-4) var(--sp-3); padding: var(--sp-3); }
+  .lead-history summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; user-select: none; }
+
+  /* ---------------- Buttons ---------------- */
+  .btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid transparent; border-radius: var(--r-sm);
+         padding: 9px 14px; cursor: pointer; font: inherit; font-weight: 600; font-size: 13.5px;
+         transition: background var(--t), border-color var(--t); }
+  .btn svg { width: 15px; height: 15px; }
+  /* Filled buttons use the deeper accent/red so white text clears AA (≥4.5:1) on dark. */
+  .btn-primary { background: var(--accent-2); color: #fff; width: 100%; justify-content: center; }
+  .btn-primary:hover { background: #2560C4; }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
+  .btn-ghost:hover { background: var(--elev); }
+  .btn-danger { background: #DC2626; color: #fff; }
+  .btn-danger:hover { background: #B91C1C; }
+  .btn-block { width: 100%; justify-content: center; }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  /* ---------------- Forms ---------------- */
+  input[type=text], input[type=search], input[type=password] {
+    font: inherit; padding: 9px 11px; border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    background: var(--surface-2); color: var(--text);
+  }
+
+  /* ---------------- Empty / skeleton / error states ---------------- */
+  .empty-state { display: grid; place-items: center; gap: 10px; padding: 64px 24px; color: var(--faint); text-align: center; }
+  .empty-state svg { width: 38px; height: 38px; opacity: .5; }
+  .skeleton { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%);
+              background-size: 400% 100%; animation: skel 1.4s ease infinite; border-radius: var(--r-sm); }
+  @keyframes skel { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+  .error-state { display: flex; align-items: center; gap: 8px; padding: var(--sp-3); margin: var(--sp-3);
+                 background: var(--danger-soft); color: var(--danger); border-radius: var(--r-sm); font-size: 13px; font-weight: 600; }
+
+  /* ---------------- Toast ---------------- */
+  #toast-stack { position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+  .toast { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--shadow);
+           padding: 11px 15px; font-size: 13px; font-weight: 600; max-width: 320px; animation: toast-in .18s ease; }
+  .toast--error { border-color: rgba(220,38,38,.3); color: var(--danger); background: var(--danger-soft); }
+  .toast--ok { border-color: rgba(5,150,105,.3); color: var(--mode-bot); background: var(--mode-bot-soft); }
+  @keyframes toast-in { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* Mobile scrim behind the lead slide-in panel — tap to close. */
+  .lead-scrim { display: none; position: fixed; inset: 0; z-index: 65; background: rgba(15,23,42,.35); }
+
+  /* ---------------- Legacy kanban (owner §2): OWN full-height screen, board only ------ */
+  .legacy-note { display: flex; align-items: center; gap: 8px; padding: 9px 13px; flex-shrink: 0;
+                 background: var(--mode-manager-soft); color: var(--mode-manager); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; }
+  /* Board fills the main height right under the topbar; columns scroll horizontally and
+     each column scrolls vertically inside its own height (no squished short board). */
+  .kanban-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); overflow: hidden; }
+  #kanban-root { flex: 1; min-height: 0; display: flex; }
+  .kb-board { flex: 1; min-height: 0; display: flex; gap: var(--sp-3); align-items: stretch; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+  .kb-col { flex: 0 0 260px; width: 260px; max-height: 100%; background: var(--surface-2); border: 1px solid var(--border);
+            border-radius: var(--r-md); padding: 9px; display: flex; flex-direction: column; overflow: hidden; }
+  .kb-col-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 10px; font-size: 11.5px;
+                 font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); flex-shrink: 0; }
+  .kb-col-cards { flex: 1; min-height: 0; overflow-y: auto; }
+  .kb-count { background: var(--surface); border: 1px solid var(--border); font-family: var(--mono); font-size: 11px; font-weight: 700;
+              min-width: 20px; height: 19px; padding: 0 6px; border-radius: 20px; display: grid; place-items: center; }
+  .kb-card { background: var(--elev); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 9px; margin-bottom: 6px; cursor: grab; }
+  .kb-card:active { cursor: grabbing; }
+  .kb-card .nm { font-weight: 600; font-size: 13px; }
+  .kb-card .foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .kb-empty { color: var(--faint); text-align: center; padding: 10px; font-size: 12px; }
+  .kb-drop-target { background: var(--accent-soft); outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .kb-ghost { opacity: .4; }
+
+  /* ---------------- Kanban dialog drawer (owner §3): slide-in over the board -------- */
+  .kanban-drawer { display: none; position: fixed; inset: 0; z-index: 80; }
+  .kanban-drawer.open { display: block; }
+  .drawer-backdrop { position: absolute; inset: 0; background: rgba(15,23,42,.40); }
+  .drawer-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(460px, 94vw); background: var(--surface);
+                  box-shadow: -12px 0 32px rgba(15,23,42,.25); display: flex; flex-direction: column; animation: drawer-in .18s ease; }
+  @keyframes drawer-in { from { transform: translateX(24px); opacity: .5; } to { transform: translateX(0); opacity: 1; } }
+  .drawer-head { display: flex; justify-content: flex-end; padding: 6px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  /* The conversation partial (chat-pane + lead-pane) loads here; the lead overlays the
+     chat within the narrow drawer, toggled by the ⓘ button (v2ToggleLeadPanel). */
+  .kanban-drawer-body { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
+  .kanban-drawer-body .chat-pane { flex: 1; min-width: 0; }
+  .kanban-drawer-body .lead-pane { position: absolute; inset: 0 0 0 auto; width: min(90%, 320px); border-left: 1px solid var(--border);
+                                    transform: translateX(100%); transition: transform var(--t); z-index: 2; box-shadow: -8px 0 24px rgba(15,23,42,.18); }
+  .kanban-drawer.lead-shown .kanban-drawer-body .lead-pane { transform: translateX(0); }
+
+  /* ---------------- Mobile: fullscreen chat + slide-in lead panel (owner §4 P0) ------- */
+  @media (max-width: 860px) {
+    /* The 216px left nav becomes a bottom tab bar so the inbox isn't crushed (P0). */
+    .app-shell { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    .nav { flex-direction: row; order: 2; border-right: none; border-top: 1px solid var(--border); padding: 4px; }
+    .nav-brand, .nav-note, .nav form, .nav a[href="/admin"] { display: none; }
+    .nav-item { flex-direction: column; gap: 3px; font-size: 11px; flex: 1; justify-content: center; border-left: none; }
+    .nav-item.active { border-left: none; }
+    /* Fluid topbar search — stop it forcing horizontal overflow on phones. */
+    .search { flex: 1; }
+    .search input { width: auto; flex: 1; min-width: 0; }
+    .me span:not(.av) { display: none; }
+    .workspace-grid { grid-template-columns: 1fr; }
+    .main-list { border-right: none; }
+    .main-workspace {
+      position: fixed; inset: 0; top: 52px; z-index: 60; background: var(--bg);
+      grid-template-columns: 1fr; transform: translateX(100%); transition: transform var(--t);
+      display: grid !important;
+    }
+    body.mobile-chat-open .main-workspace { transform: translateX(0); }
+    .btn-back { display: inline-flex; }
+    .lead-pane {
+      position: fixed; inset: 0 0 0 auto; width: min(88vw, 360px); top: 52px; z-index: 70;
+      background: var(--surface); box-shadow: -8px 0 24px rgba(15,23,42,.18);
+      transform: translateX(100%); transition: transform var(--t);
+    }
+    body.lead-open .lead-pane { transform: translateX(0); }
+    body.lead-open .lead-scrim { display: block; }
+    .composer-wrap { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
+    .chat-pane { height: 100%; }
+  }
+  @media (min-width: 861px) { .lead-pane { display: block !important; } }
+
+  *:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>

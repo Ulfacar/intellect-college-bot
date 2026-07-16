@@ -131,6 +131,12 @@ class Settings(BaseSettings):
     session_secret: str = "change-me-college-session-secret"
     demo_login: bool = False
 
+    # Increment 8A: dev-only visual-redesign prototype of the admin UI, mounted at
+    # /admin-v2 ONLY when this is true (default False — off in prod & tests). It is a
+    # separate, view-only router (app/admin/router_v2.py) that reuses the existing
+    # app/admin/router.py data helpers/stores; the existing /admin stays untouched.
+    admin_ui_v2: bool = False
+
     def manager_list(self) -> list[ManagerConfig]:
         if self.managers:
             return self.managers

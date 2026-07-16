@@ -1,0 +1,32 @@
+{# dialog_owner rendering — SINGLE source of truth for the three-state pill/dot/chip.
+   `c` is any dict/object exposing `.dialog_owner` ('bot'|'manager'|'paused') and
+   `.assigned_to`. assigned_to NAMES the manager but does NOT define the mode — see
+   app/admin/router_v2.py's `_dialog_owner()` docstring (owner §1). #}
+
+{% macro owner_label(c) -%}
+  {%- if c.dialog_owner == 'bot' -%}Бот отвечает
+  {%- elif c.dialog_owner == 'manager' -%}
+    {%- if c.assigned_to -%}Менеджер · {{ c.assigned_to }}{%- else -%}Менеджер не назначен{%- endif -%}
+  {%- elif c.dialog_owner == 'paused' -%}Бот на паузе
+  {%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% macro owner_pill(c, size='md') -%}
+<span class="pill pill-owner pill-{{ c.dialog_owner }}{{ ' pill-sm' if size == 'sm' else '' }}">
+  <span class="pill-dot"></span>{{ owner_label(c) }}
+</span>
+{%- endmacro %}
+
+{% macro owner_dot(c) -%}
+<span class="row-dot row-dot-{{ c.dialog_owner }}" title="{{ owner_label(c) }}"></span>
+{%- endmacro %}
+
+{% macro owner_chip(c) -%}
+<span class="chip chip-owner chip-{{ c.dialog_owner }}" title="{{ owner_label(c) }}">
+  {%- if c.dialog_owner == 'bot' -%}Бот
+  {%- elif c.dialog_owner == 'paused' -%}Пауза
+  {%- elif c.assigned_to -%}{{ c.assigned_to }}
+  {%- else -%}Менеджер
+  {%- endif -%}
+</span>
+{%- endmacro %}

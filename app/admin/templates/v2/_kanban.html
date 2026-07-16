@@ -1,0 +1,31 @@
+{% from "_owner_macros.html" import owner_chip %}
+{# Legacy kanban (owner §2): SAME 7 app.admin.router.BOARD_COLUMNS, unchanged — shown
+   as-is for visual continuity while the canonical 11 lead_status stay untouched and get
+   no UI here. The single "legacy-board (временный)" plaque lives in the Канбан header in
+   shell.html (owner §4), NOT here — this partial is the board only, so the 15s outerHTML
+   auto-refresh cannot duplicate the plaque. Marker below keeps the label discoverable
+   (aria/data) without rendering a second visible plaque. #}
+<div id="kb-board-{{ funnel }}" class="kb-board" data-funnel="{{ funnel }}" data-legacy-board="временный"
+     hx-get="/admin-v2/board/{{ funnel }}"
+     hx-trigger="every 15s [document.visibilityState==='visible' && !window.__v2Dragging]"
+     hx-swap="outerHTML" hx-target="this">
+  {% for col in columns %}
+  <div class="kb-col" data-col="{{ col.key }}">
+    <div class="kb-col-head"><span>{{ col.label }}</span><span class="kb-count">{{ col.cards|length }}</span></div>
+    <div class="kb-col-cards" data-col="{{ col.key }}">
+      {% for c in col.cards %}
+      <div class="kb-card" data-uid="{{ c.user_id }}" onclick="openV2Kanban('{{ c.user_id }}')">
+        <div class="nm">{{ c.name }}</div>
+        <div class="foot">
+          {{ owner_chip(c) }}
+          {% if c.needs_reply %}<span class="pill pill-urgent pill-sm">ваш ход</span>{% endif %}
+          {% if c.lead_temperature == 'hot' %}<span class="temp-tag temp-hot">горячий</span>{% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="kb-empty">—</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>

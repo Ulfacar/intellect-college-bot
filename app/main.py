@@ -157,6 +157,14 @@ if settings.admin_enabled:
     from app.admin.router import router as admin_router
     app.include_router(admin_router)
 
+# Increment 8A: dev-only visual-redesign prototype at /admin-v2 — view-only, reuses the
+# same stores/helpers as app/admin/router.py. Mounted ONLY when settings.admin_ui_v2 is
+# true (default False), so production and the existing test suite are unaffected; the
+# router isn't even imported when the flag is off.
+if settings.admin_ui_v2:
+    from app.admin.router_v2 import router as admin_router_v2
+    app.include_router(admin_router_v2)
+
 # Дев-демо: одиночный admission-бот в Telegram. Поднимается только при заданном токене —
 # продовый WhatsApp/Wappi-канал Telegram-токена не требует.
 _telegram = TelegramAdapter() if settings.telegram_bot_token else None
