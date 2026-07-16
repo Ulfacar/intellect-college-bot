@@ -82,13 +82,15 @@ def _msg(uid: str, text: str, kind: str = "text") -> Message:
 # --------------------------------------------------------------------------------------
 
 def test_keyboard_layout_matches_spec():
-    # Phone-friendly re-row (Fable UX review #3): 3/2/2, no button dropped.
+    # Increment 7.1: two INDEPENDENT axes — quality row (3, unchanged from Increment 7
+    # Fable UX review #3), strategy split 2+2 (4 buttons), comment on its own row.
     kb = build_feedback_keyboard("tok123456789")
     rows = kb["inline_keyboard"]
-    assert len(rows) == 3
+    assert len(rows) == 4
     assert [b["text"] for b in rows[0]] == ["✅ Правильно", "⚠️ Неточно", "❌ Неправильно"]
-    assert [b["text"] for b in rows[1]] == ["🔥 Нужно дожать", "🧊 Не дожимать"]
-    assert [b["text"] for b in rows[2]] == ["👤 Нужен был менеджер", "💬 Комментарий"]
+    assert [b["text"] for b in rows[1]] == ["👍 Вёл диалог верно", "🔥 Надо было дожать"]
+    assert [b["text"] for b in rows[2]] == ["🛑 Зря дожимал", "👤 Нужен был менеджер"]
+    assert [b["text"] for b in rows[3]] == ["💬 Комментарий"]
 
 
 # --------------------------------------------------------------------------------------
@@ -106,7 +108,7 @@ def test_callback_data_format_and_byte_length():
             assert data.startswith(f"fb:{token}:")
             assert len(data.encode("utf-8")) < 64
             codes.append(data.rsplit(":", 1)[1])
-    assert codes == ["ok", "inacc", "bad", "push", "nopush", "mgr", "cmt"]
+    assert codes == ["q_ok", "q_inacc", "q_bad", "s_appr", "s_push", "s_nopush", "s_mgr", "cmt"]
     # never leak text/phone/history/secrets/JSON into callback_data
     for row in kb["inline_keyboard"]:
         for btn in row:
@@ -140,13 +142,14 @@ def test_faq_answer_attaches_keyboard_for_its_own_token(monkeypatch):
         assert ctx.bot_message_id is not None
         assert markup == {
             "inline_keyboard": [
-                [{"text": "✅ Правильно", "callback_data": f"fb:{ctx.feedback_token}:ok"},
-                 {"text": "⚠️ Неточно", "callback_data": f"fb:{ctx.feedback_token}:inacc"},
-                 {"text": "❌ Неправильно", "callback_data": f"fb:{ctx.feedback_token}:bad"}],
-                [{"text": "🔥 Нужно дожать", "callback_data": f"fb:{ctx.feedback_token}:push"},
-                 {"text": "🧊 Не дожимать", "callback_data": f"fb:{ctx.feedback_token}:nopush"}],
-                [{"text": "👤 Нужен был менеджер", "callback_data": f"fb:{ctx.feedback_token}:mgr"},
-                 {"text": "💬 Комментарий", "callback_data": f"fb:{ctx.feedback_token}:cmt"}],
+                [{"text": "✅ Правильно", "callback_data": f"fb:{ctx.feedback_token}:q_ok"},
+                 {"text": "⚠️ Неточно", "callback_data": f"fb:{ctx.feedback_token}:q_inacc"},
+                 {"text": "❌ Неправильно", "callback_data": f"fb:{ctx.feedback_token}:q_bad"}],
+                [{"text": "👍 Вёл диалог верно", "callback_data": f"fb:{ctx.feedback_token}:s_appr"},
+                 {"text": "🔥 Надо было дожать", "callback_data": f"fb:{ctx.feedback_token}:s_push"}],
+                [{"text": "🛑 Зря дожимал", "callback_data": f"fb:{ctx.feedback_token}:s_nopush"},
+                 {"text": "👤 Нужен был менеджер", "callback_data": f"fb:{ctx.feedback_token}:s_mgr"}],
+                [{"text": "💬 Комментарий", "callback_data": f"fb:{ctx.feedback_token}:cmt"}],
             ]
         }
     _run(scenario())

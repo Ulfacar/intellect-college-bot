@@ -541,11 +541,14 @@ class AnswerContext(Base):
 
 
 class Feedback(Base):
-    """Increment 7 telegram-pilot: one tester's rating/comment on ONE `AnswerContext`
-    row. `rating` and `review_status` are SEPARATE axes (what the tester said vs where
-    the review workflow stands) — see `app/core/feedback_service.py`.
-    `UNIQUE(answer_context_id, telegram_tester_id)` — a re-rating UPDATEs this same
-    row (§8 idempotency), it never inserts a second one."""
+    """Increment 7 telegram-pilot (+ Increment 7.1 corrective, see
+    `migrations/0006_feedback_two_axis.sql`): one tester's rating/comment on ONE
+    `AnswerContext` row. `rating` (LEGACY, read-only after the one-time backfill —
+    new code never writes it again), `quality_rating`, `strategy_rating` and
+    `review_status` are all SEPARATE, INDEPENDENT axes — see
+    `app/core/feedback_service.py`. `UNIQUE(answer_context_id, telegram_tester_id)` —
+    a re-rating on EITHER axis UPDATEs this same row in place (§8 idempotency), it
+    never inserts a second one, and never touches the OTHER axis or the comment."""
 
     __tablename__ = "feedback"
 
@@ -556,8 +559,17 @@ class Feedback(Base):
     session_id: Mapped[str] = mapped_column(String(64), default="")
     bot_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     telegram_tester_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # LEGACY single-axis value (Increment 7, superseded by the two columns below).
     # correct | inaccurate | incorrect | should_push | should_not_push | should_handoff
+    # Kept nullable, never dropped, never written by new code — read-only after the
+    # Increment 7.1 backfill (migrations/0006_feedback_two_axis.sql).
     rating: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+    # Increment 7.1: independent QUALITY-of-answer axis.
+    # correct | inaccurate | incorrect
+    quality_rating: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+    # Increment 7.1: independent conversation-STRATEGY axis.
+    # appropriate | should_push | should_not_push | should_handoff
+    strategy_rating: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_intent: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -630,6 +642,17 @@ async def init_models(engine: AsyncEngine) -> None:
             "allow_during_qualification": "BOOLEAN DEFAULT TRUE",
             "updated_by": "VARCHAR(64) DEFAULT ''",
         })
+        # Increment 7.1 corrective: `feedback` already existed as of migration 0005 —
+        # `create_all` above only creates tables that don't exist yet, so an
+        # already-provisioned installation needs these two NEW columns added
+        # explicitly (same idempotent upgrade convention as the tables above). A
+        # brand-new SQLite/Postgres database gets them for free via `create_all`
+        # (the ORM model already carries them) — this call is then a no-op.
+        await _ensure_columns(conn, "feedback", {
+            "quality_rating": "VARCHAR(24)",
+            "strategy_rating": "VARCHAR(24)",
+        })
+        await backfill_feedback_rating_axes(conn)
 
 
 async def _ensure_columns(conn, table: str, additions: dict[str, str]) -> None:
@@ -640,6 +663,33 @@ async def _ensure_columns(conn, table: str, additions: dict[str, str]) -> None:
     for column, ddl in additions.items():
         if column not in existing:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
+# Increment 7.1 corrective (`migrations/0006_feedback_two_axis.sql`): legacy
+# single-axis `feedback.rating` values, split by which NEW axis they belong to.
+# `appropriate` has no legacy source -- it stays NULL until a tester taps the new
+# "👍 Ведение верное" button.
+_FEEDBACK_QUALITY_LEGACY_VALUES = ("correct", "inaccurate", "incorrect")
+_FEEDBACK_STRATEGY_LEGACY_VALUES = ("should_push", "should_not_push", "should_handoff")
+
+
+async def backfill_feedback_rating_axes(conn) -> None:
+    """Idempotent backfill mapping legacy `feedback.rating` onto `quality_rating` /
+    `strategy_rating` -- mirrors, statement-for-statement, the two UPDATEs in
+    `migrations/0006_feedback_two_axis.sql` so the SAME logic is exercised against
+    SQLite in tests and Postgres in prod. Only fills a column that is CURRENTLY NULL
+    (safe to re-run any number of times, including after a partial application);
+    `rating` itself is NEVER modified here."""
+    quality_values = ", ".join(f"'{v}'" for v in _FEEDBACK_QUALITY_LEGACY_VALUES)
+    strategy_values = ", ".join(f"'{v}'" for v in _FEEDBACK_STRATEGY_LEGACY_VALUES)
+    await conn.execute(text(
+        f"UPDATE feedback SET quality_rating = rating "
+        f"WHERE quality_rating IS NULL AND rating IN ({quality_values})"
+    ))
+    await conn.execute(text(
+        f"UPDATE feedback SET strategy_rating = rating "
+        f"WHERE strategy_rating IS NULL AND rating IN ({strategy_values})"
+    ))
 
 
 async def init_db() -> None:

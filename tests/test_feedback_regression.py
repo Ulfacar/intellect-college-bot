@@ -161,8 +161,9 @@ def test_telegram_adapter_send_contract_preserved_with_reply_markup(monkeypatch)
         from aiogram.types import InlineKeyboardMarkup
         sent_markup = mock_send_message.call_args.kwargs["reply_markup"]
         assert isinstance(sent_markup, InlineKeyboardMarkup)
-        assert len(sent_markup.inline_keyboard) == 3
-        assert sent_markup.inline_keyboard[2][1].callback_data == "fb:tok123456789:cmt"
+        # Increment 7.1: 4 rows (quality x3, strategy 2+2, comment on its own row).
+        assert len(sent_markup.inline_keyboard) == 4
+        assert sent_markup.inline_keyboard[3][0].callback_data == "fb:tok123456789:cmt"
 
         mock_answer = AsyncMock(return_value=True)
         monkeypatch.setattr(adapter._bot, "answer_callback_query", mock_answer)

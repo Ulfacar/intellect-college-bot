@@ -1,7 +1,9 @@
-"""Increment 7: idempotency (brief scenarios 27-31, §8). `UNIQUE(answer_context_id,
-telegram_tester_id)` — first rating creates the row; a later rating from the SAME
-tester on the SAME answer UPDATEs it in place (keeping any existing comment); the same
-rating pressed twice is a no-op; concurrent callbacks collapse to exactly one row."""
+"""Increment 7 (+ Increment 7.1 corrective, two-axis split): idempotency (brief
+scenarios 27-31, §8). `UNIQUE(answer_context_id, telegram_tester_id)` — the first
+rating on EITHER axis creates the row; a later rating from the SAME tester on the SAME
+answer/SAME axis UPDATEs it in place (keeping any existing comment AND the other
+axis); the same value on the same axis pressed twice is a no-op; concurrent callbacks
+collapse to exactly one row."""
 from __future__ import annotations
 
 import asyncio
@@ -74,7 +76,7 @@ async def _sent_context(bot_id: str, tester_id: str):
     return await get_answer_context_store().get(ctx.id)
 
 
-# 27. First rating creates a Feedback row, acked "Оценка сохранена."
+# 27. First rating creates a Feedback row, acked with the quality-axis save copy.
 def test_first_rating_creates_and_acks_saved(monkeypatch):
     async def scenario():
         monkeypatch.setattr(settings, "telegram_allowed_user_ids", [2701])
@@ -82,47 +84,62 @@ def test_first_rating_creates_and_acks_saved(monkeypatch):
         adapter = _RecordingAdapter()
         await FeedbackService().handle_callback(
             bot_id="idem1", adapter=adapter, callback_query_id="cb", tester_id=2701, chat_id=2701,
-            data=f"fb:{ctx.feedback_token}:ok",
+            data=f"fb:{ctx.feedback_token}:q_ok",
         )
         rows = await get_feedback_store().list_all()
         assert len(rows) == 1
-        assert rows[0].rating == "correct"
-        assert adapter.acks[-1][1] == "Оценка сохранена: Правильно."
+        assert rows[0].quality_rating == "correct"
+        assert rows[0].strategy_rating is None  # the other axis is untouched
+        assert rows[0].rating is None  # legacy column is never written by new code
+        assert adapter.acks[-1][1] == (
+            "Качество ответа сохранено: Правильно. "
+            "Оценка ведения диалога — отдельно, она не сбрасывается."
+        )
         lead_audit = await get_audit_store().list_for_lead(ctx.lead_id)
         recorded = [a for a in lead_audit if a.event_type == "feedback_recorded"]
         assert len(recorded) == 1
     _run(scenario())
 
 
-# 28. Re-rating (different value) UPDATEs the SAME row, keeps an existing comment,
-# acked "Оценка обновлена."
-def test_re_rating_updates_keeps_comment_and_acks_updated(monkeypatch):
+# 28. Re-rating quality (different value) UPDATEs the SAME row, keeps an existing
+# comment AND the strategy axis untouched, acked with the quality-axis save copy.
+def test_re_rating_quality_keeps_comment_and_strategy(monkeypatch):
     async def scenario():
         monkeypatch.setattr(settings, "telegram_allowed_user_ids", [2801])
         ctx = await _sent_context("idem2", "2801")
         adapter = _RecordingAdapter()
         svc = FeedbackService()
         await svc.handle_callback(
-            bot_id="idem2", adapter=adapter, callback_query_id="cb1", tester_id=2801, chat_id=2801,
-            data=f"fb:{ctx.feedback_token}:ok",
+            bot_id="idem2", adapter=adapter, callback_query_id="cb0", tester_id=2801, chat_id=2801,
+            data=f"fb:{ctx.feedback_token}:q_ok",
         )
-        # tester also leaves a comment via the pending-comment flow
+        # tester also sets the strategy axis and leaves a comment via the pending-comment flow
+        await svc.handle_callback(
+            bot_id="idem2", adapter=adapter, callback_query_id="cb1", tester_id=2801, chat_id=2801,
+            data=f"fb:{ctx.feedback_token}:s_push",
+        )
         await get_feedback_store().create_or_update_comment(
             answer_context_id=ctx.id, telegram_tester_id="2801", comment="было неточно про сроки",
             conversation_id=ctx.conversation_id, lead_id=ctx.lead_id, session_id=ctx.session_id, bot_id="idem2",
         )
         await svc.handle_callback(
             bot_id="idem2", adapter=adapter, callback_query_id="cb2", tester_id=2801, chat_id=2801,
-            data=f"fb:{ctx.feedback_token}:inacc",
+            data=f"fb:{ctx.feedback_token}:q_inacc",
         )
         rows = await get_feedback_store().list_all()
         assert len(rows) == 1  # still exactly one row
-        assert rows[0].rating == "inaccurate"
+        assert rows[0].quality_rating == "inaccurate"
+        assert rows[0].strategy_rating == "should_push"  # preserved — independent axis
         assert rows[0].comment == "было неточно про сроки"  # preserved
-        assert adapter.acks[-1][1] == "Оценка заменена — по ответу учитывается только одна оценка: Неточно."
+        assert adapter.acks[-1][1] == (
+            "Качество ответа сохранено: Неточно. "
+            "Оценка ведения диалога — отдельно, она не сбрасывается."
+        )
         lead_audit = await get_audit_store().list_for_lead(ctx.lead_id)
         changed = [a for a in lead_audit if a.event_type == "feedback_rating_changed"]
-        assert len(changed) == 1
+        # cb1 (first-ever s_push, "updated" since the row already existed from cb0)
+        # and cb2 (q_ok -> q_inacc) both change something on the existing row.
+        assert len(changed) == 2
     _run(scenario())
 
 
@@ -137,7 +154,7 @@ def test_same_rating_twice_is_noop(monkeypatch):
         for cb_id in ("cb1", "cb2"):
             await svc.handle_callback(
                 bot_id="idem3", adapter=adapter, callback_query_id=cb_id, tester_id=2901, chat_id=2901,
-                data=f"fb:{ctx.feedback_token}:ok",
+                data=f"fb:{ctx.feedback_token}:q_ok",
             )
         rows = await get_feedback_store().list_all()
         assert len(rows) == 1
@@ -162,23 +179,23 @@ def test_concurrent_rating_calls_collapse_to_one_row(backend):
         store = await _fb_store(backend)
         if backend == "memory":
             results = await asyncio.gather(
-                store.create_or_update_rating(
-                    answer_context_id=1, telegram_tester_id="t1", rating="correct",
+                store.set_axis_rating(
+                    answer_context_id=1, telegram_tester_id="t1", axis="quality", value="correct",
                     conversation_id=1, lead_id=1, session_id="s1", bot_id="b1",
                 ),
-                store.create_or_update_rating(
-                    answer_context_id=1, telegram_tester_id="t1", rating="inaccurate",
+                store.set_axis_rating(
+                    answer_context_id=1, telegram_tester_id="t1", axis="quality", value="inaccurate",
                     conversation_id=1, lead_id=1, session_id="s1", bot_id="b1",
                 ),
             )
         else:
             results = [
-                await store.create_or_update_rating(
-                    answer_context_id=1, telegram_tester_id="t1", rating="correct",
+                await store.set_axis_rating(
+                    answer_context_id=1, telegram_tester_id="t1", axis="quality", value="correct",
                     conversation_id=1, lead_id=1, session_id="s1", bot_id="b1",
                 ),
-                await store.create_or_update_rating(
-                    answer_context_id=1, telegram_tester_id="t1", rating="inaccurate",
+                await store.set_axis_rating(
+                    answer_context_id=1, telegram_tester_id="t1", axis="quality", value="inaccurate",
                     conversation_id=1, lead_id=1, session_id="s1", bot_id="b1",
                 ),
             ]

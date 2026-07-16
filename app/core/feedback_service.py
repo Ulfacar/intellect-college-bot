@@ -1,10 +1,16 @@
-"""Increment 7 telegram-pilot: FeedbackService — ALL business logic for the unified
-AnswerContext + Feedback model. Every automatic-answer send point (FAQ/handoff in
-`app/core/telegram_commands.py`, LLM/fallbacks in `app/core/ai_reply.py`) calls
-`prepare_answer(...)`/`finalize_answer(...)` here to create the `answer_context` row
-and (conditionally) build the inline-keyboard `reply_markup`. The Telegram callback
-handler (`app/main.py`) is thin — it only extracts `callback_query` fields and calls
-`handle_callback(...)`; every decision (authorization, idempotency, audit) lives here.
+"""Increment 7 telegram-pilot (+ Increment 7.1 corrective, two-axis split): FeedbackService
+— ALL business logic for the unified AnswerContext + Feedback model. Every
+automatic-answer send point (FAQ/handoff in `app/core/telegram_commands.py`,
+LLM/fallbacks in `app/core/ai_reply.py`) calls `prepare_answer(...)`/`finalize_answer(...)`
+here to create the `answer_context` row and (conditionally) build the inline-keyboard
+`reply_markup`. The Telegram callback handler (`app/main.py`) is thin — it only extracts
+`callback_query` fields and calls `handle_callback(...)`; every decision (authorization,
+idempotency, audit) lives here.
+
+Increment 7.1 replaces the single `rating` axis with two INDEPENDENT axes —
+`quality_rating` (was this answer's CONTENT correct?) and `strategy_rating` (was the
+conversation-handling APPROACH right?). Setting one NEVER clears the other, or the
+comment — see `app/integrations/panel/feedback_store.py::set_axis_rating`.
 
 Design docs: task brief §5-§18 (unified AnswerContext, inline feedback buttons,
 callback authorization, idempotency, pending-comment state, `/feedback` command,
@@ -33,46 +39,76 @@ from app.integrations.panel.answer_context_store import (
     get_answer_context_store,
 )
 from app.integrations.panel.audit_store import get_audit_store
-from app.integrations.panel.feedback_store import RATINGS, FeedbackView, get_feedback_store
+from app.integrations.panel.feedback_store import (
+    QUALITY_RATINGS,
+    STRATEGY_RATINGS,
+    FeedbackView,
+    get_feedback_store,
+)
 from app.integrations.panel.leadstore import get_lead_store
 
 log = logging.getLogger("feedback_service")
 
 # --------------------------------------------------------------------------------------
-# Inline keyboard layout (§5) — codes kept short so `fb:<token>:<code>` stays well under
-# the 64-byte callback_data limit (token ~12 chars + longest code "nopush" = 6 -> 22
-# bytes total). NEVER put text/phone/history/secret/long UUID/JSON in callback_data.
+# Inline keyboard layout (§5, corrective Increment 7.1 — two INDEPENDENT axes) — codes
+# kept short so `fb:<token>:<code>` stays well under the 64-byte callback_data limit
+# (token ~12 chars + longest code "s_nopush" = 8 -> 24 bytes total). NEVER put
+# text/phone/history/secret/long UUID/JSON in callback_data. `q_`/`s_` prefixes make the
+# axis a code REVIEWS by eye, not just a lookup-table detail.
 # --------------------------------------------------------------------------------------
 
-CODE_TO_RATING: dict[str, str] = {
-    "ok": "correct", "inacc": "inaccurate", "bad": "incorrect",
-    "push": "should_push", "nopush": "should_not_push", "mgr": "should_handoff",
+QUALITY_CODE_TO_VALUE: dict[str, str] = {"q_ok": "correct", "q_inacc": "inaccurate", "q_bad": "incorrect"}
+STRATEGY_CODE_TO_VALUE: dict[str, str] = {
+    "s_appr": "appropriate", "s_push": "should_push", "s_nopush": "should_not_push", "s_mgr": "should_handoff",
 }
 COMMENT_CODE = "cmt"
-assert set(CODE_TO_RATING.values()) == RATINGS  # keep the two enums in sync
+
+# code -> (axis, value). The ONLY place callback codes are mapped to an axis+value —
+# `handle_callback` looks this up AFTER every authorization check has already passed
+# (§7 — the code->axis mapping never affects, and is never affected by, authorization).
+CODE_TO_AXIS_VALUE: dict[str, tuple[str, str]] = {
+    **{code: ("quality", value) for code, value in QUALITY_CODE_TO_VALUE.items()},
+    **{code: ("strategy", value) for code, value in STRATEGY_CODE_TO_VALUE.items()},
+}
+assert set(QUALITY_CODE_TO_VALUE.values()) == QUALITY_RATINGS  # keep the two enums in sync
+assert set(STRATEGY_CODE_TO_VALUE.values()) == STRATEGY_RATINGS
 
 # Human RU labels echoed back in the callback ack so the tester sees WHICH of the small
-# buttons registered (Fable UX review #2). These are display labels only — the stored
-# `rating` value and its callback `code` are unchanged. The 👤 label is intentionally
+# buttons registered (Fable UX review #2, Increment 7). These are display labels only —
+# the stored value and its callback `code` are unchanged. The 👤 label is intentionally
 # past tense ("Нужен был менеджер") to read as a judgement about THIS reply and avoid
-# colliding with the live `/manager` command (Fable UX review #4).
-RATING_LABELS: dict[str, str] = {
+# colliding with the live `/manager` command (Fable UX review #4, Increment 7).
+QUALITY_LABELS: dict[str, str] = {
     "correct": "Правильно",
     "inaccurate": "Неточно",
     "incorrect": "Неправильно",
-    "should_push": "Нужно дожать",
-    "should_not_push": "Не дожимать",
+}
+STRATEGY_LABELS: dict[str, str] = {
+    "appropriate": "Вёл диалог верно",
+    "should_push": "Надо было дожать",
+    "should_not_push": "Зря дожимал",
     "should_handoff": "Нужен был менеджер",
 }
-assert set(RATING_LABELS) == RATINGS  # every rating has a label
+assert set(QUALITY_LABELS) == QUALITY_RATINGS  # every quality value has a label
+assert set(STRATEGY_LABELS) == STRATEGY_RATINGS  # every strategy value has a label
 
 
-def _first_rating_text(rating: str) -> str:
-    return f"Оценка сохранена: {RATING_LABELS[rating]}."
+# Ack copy (Fable button UX review, Increment 7.1) — each axis names ITSELF by the
+# human word on its buttons (never "стратегия", which is on no button) and explicitly
+# reassures that the OTHER axis is independent and not reset. created/updated/noop all
+# use the same text (the axes are independent, so we NEVER say one "replaces" anything).
+def _quality_saved_text(value: str) -> str:
+    return (
+        f"Качество ответа сохранено: {QUALITY_LABELS[value]}. "
+        "Оценка ведения диалога — отдельно, она не сбрасывается."
+    )
 
 
-def _updated_rating_text(rating: str) -> str:
-    return f"Оценка заменена — по ответу учитывается только одна оценка: {RATING_LABELS[rating]}."
+def _strategy_saved_text(value: str) -> str:
+    return (
+        f"Ведение диалога сохранено: {STRATEGY_LABELS[value]}. "
+        "Оценка качества ответа — отдельно, она не сбрасывается."
+    )
 
 
 _NEUTRAL_REJECT_TEXT = "Действие недоступно."
@@ -100,25 +136,32 @@ def _btn(text: str, feedback_token: str, code: str) -> dict[str, str]:
 def build_feedback_keyboard(feedback_token: str) -> dict[str, Any]:
     """Plain Bot-API-shaped `reply_markup` dict (never an aiogram type here — the
     adapter, not business logic, knows about aiogram, see `app/channels/telegram.py`).
-    Phone-friendly row layout (Fable UX review #3 — no button dropped, callback_data
-    unchanged):
-      [✅ Правильно | ⚠️ Неточно | ❌ Неправильно]
-      [🔥 Нужно дожать | 🧊 Не дожимать]
-      [👤 Нужен был менеджер | 💬 Комментарий]
+    Increment 7.1: two INDEPENDENT button groups, each sets ONLY its own axis —
+    pressing a quality button never touches strategy_rating and vice versa. Phone-
+    friendly row layout (quality row unchanged from Increment 7 Fable UX review #3;
+    the new 4-button strategy group is split 2+2 so no row is crowded on a phone
+    screen — Fable UX review pending on the exact split):
+      [✅ Правильно | ⚠️ Неточно | ❌ Неправильно]      -- quality_rating
+      [👍 Вёл диалог верно | 🔥 Надо было дожать]        -- strategy_rating
+      [🛑 Зря дожимал | 👤 Нужен был менеджер]           -- strategy_rating
+      [💬 Комментарий]                                   -- independent of both axes
     """
     return {
         "inline_keyboard": [
             [
-                _btn("✅ Правильно", feedback_token, "ok"),
-                _btn("⚠️ Неточно", feedback_token, "inacc"),
-                _btn("❌ Неправильно", feedback_token, "bad"),
+                _btn("✅ Правильно", feedback_token, "q_ok"),
+                _btn("⚠️ Неточно", feedback_token, "q_inacc"),
+                _btn("❌ Неправильно", feedback_token, "q_bad"),
             ],
             [
-                _btn("🔥 Нужно дожать", feedback_token, "push"),
-                _btn("🧊 Не дожимать", feedback_token, "nopush"),
+                _btn("👍 Вёл диалог верно", feedback_token, "s_appr"),
+                _btn("🔥 Надо было дожать", feedback_token, "s_push"),
             ],
             [
-                _btn("👤 Нужен был менеджер", feedback_token, "mgr"),
+                _btn("🛑 Зря дожимал", feedback_token, "s_nopush"),
+                _btn("👤 Нужен был менеджер", feedback_token, "s_mgr"),
+            ],
+            [
                 _btn("💬 Комментарий", feedback_token, COMMENT_CODE),
             ],
         ]
@@ -312,31 +355,33 @@ class FeedbackService:
             await _safe_ack(adapter, callback_query_id, _COMMENT_ACK_TEXT)
             return
 
-        rating = CODE_TO_RATING.get(code)
-        if rating is None:
+        axis_value = CODE_TO_AXIS_VALUE.get(code)
+        if axis_value is None:
             await self._reject(adapter, callback_query_id, reason="unknown_code", bot_id=bot_id, tester_id=tester_id)
             return
+        axis, value = axis_value
+        saved_text = _quality_saved_text(value) if axis == "quality" else _strategy_saved_text(value)
 
-        view, action = await self._fb_store.create_or_update_rating(
-            answer_context_id=ctx.id, telegram_tester_id=str(tester_id), rating=rating,
+        view, action = await self._fb_store.set_axis_rating(
+            answer_context_id=ctx.id, telegram_tester_id=str(tester_id), axis=axis, value=value,
             conversation_id=ctx.conversation_id, lead_id=ctx.lead_id, session_id=ctx.session_id, bot_id=bot_id,
         )
         if action == "created":
             await self._safe_audit(
                 event_type="feedback_recorded", lead_id=ctx.lead_id, conversation_id=ctx.conversation_id,
                 actor=f"telegram_tester:{tester_id}", source="telegram_test",
-                metadata={"feedback_id": view.id, "rating": rating},
+                metadata={"feedback_id": view.id, "axis": axis, "rating": value},
             )
-            await _safe_ack(adapter, callback_query_id, _first_rating_text(rating))
+            await _safe_ack(adapter, callback_query_id, saved_text)
         elif action == "updated":
             await self._safe_audit(
                 event_type="feedback_rating_changed", lead_id=ctx.lead_id, conversation_id=ctx.conversation_id,
                 actor=f"telegram_tester:{tester_id}", source="telegram_test",
-                metadata={"feedback_id": view.id, "rating": rating},
+                metadata={"feedback_id": view.id, "axis": axis, "rating": value},
             )
-            await _safe_ack(adapter, callback_query_id, _updated_rating_text(rating))
-        else:  # "noop" — same rating pressed twice, still ack so the spinner clears
-            await _safe_ack(adapter, callback_query_id, _first_rating_text(rating))
+            await _safe_ack(adapter, callback_query_id, saved_text)
+        else:  # "noop" — same value on the same axis pressed twice, still ack (spinner clears)
+            await _safe_ack(adapter, callback_query_id, saved_text)
 
     async def _safe_audit(self, **fields: Any) -> None:
         try:
@@ -399,21 +444,28 @@ class FeedbackService:
     # ---- review-backend methods (§17/§18) — Increment 8 builds the admin UI on top ----
 
     async def list_feedback(
-        self, *, rating: str | None = None, review_status: str | None = None, bot_id: str | None = None,
+        self, *, rating: str | None = None, quality_rating: str | None = None,
+        strategy_rating: str | None = None, review_status: str | None = None, bot_id: str | None = None,
         tester_id: Any = None, source: str | None = None, intent: str | None = None,
         applied_status: str | None = None, language: str | None = None,
         date_from: datetime | None = None, date_to: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Returns `[{"feedback": FeedbackView, "answer_context": AnswerContextView|None}, ...]`.
         Composed in Python (pilot scale, no need for a cross-table SQL join yet) —
-        feedback-native filters (`rating`/`review_status`/`bot_id`/`tester_id`/date
-        range) apply to the `feedback` row, answer-context-native filters
-        (`source`/`intent`/`applied_status`/`language`) apply to its linked
-        `answer_context` row."""
+        feedback-native filters (`rating` [LEGACY]/`quality_rating`/`strategy_rating`/
+        `review_status`/`bot_id`/`tester_id`/date range) apply to the `feedback` row,
+        answer-context-native filters (`source`/`intent`/`applied_status`/`language`)
+        apply to its linked `answer_context` row. `quality_rating`/`strategy_rating`
+        (Increment 7.1) are INDEPENDENT filters — either, both, or neither may be
+        passed, in addition to the existing ones."""
         rows = await self._fb_store.list_all()
         out: list[dict[str, Any]] = []
         for fb in rows:
             if rating is not None and fb.rating != rating:
+                continue
+            if quality_rating is not None and fb.quality_rating != quality_rating:
+                continue
+            if strategy_rating is not None and fb.strategy_rating != strategy_rating:
                 continue
             if review_status is not None and fb.review_status != review_status:
                 continue
@@ -473,23 +525,37 @@ class FeedbackService:
 
     async def get_feedback_statistics(self, *, bot_id: str | None = None) -> dict[str, Any]:
         """Pilot QUALITY metrics (NOT business conversion — that stays LeadStatusService/
-        the admin funnel). §18: total rated, per-rating counts, unreviewed count,
-        faq/llm/fallback share (among RATED feedback), count of feedback-eligible
-        answers with NO feedback at all."""
+        the admin funnel). §6/§18, Increment 7.1: quality and strategy are computed as
+        two SEPARATE axes — never merged into one overall percent, each with its own
+        per-value counts and its own count of feedback-eligible answers missing THAT
+        axis's rating (an answer with a strategy rating but no quality rating counts
+        toward `answers_without_quality_rating`, and vice versa). `unreviewed_count`/
+        `source_share`/`no_feedback_count` stay axis-agnostic, computed over ANY
+        feedback at all (rating on either axis, or just a comment)."""
         all_fb = await self._fb_store.list_all()
         if bot_id is not None:
             all_fb = [f for f in all_fb if f.bot_id == bot_id]
-        rated = [f for f in all_fb if f.rating is not None]
 
-        per_rating = dict.fromkeys(RATINGS, 0)
-        for f in rated:
-            if f.rating in per_rating:
-                per_rating[f.rating] += 1
+        quality_rated = [f for f in all_fb if f.quality_rating is not None]
+        strategy_rated = [f for f in all_fb if f.strategy_rating is not None]
+
+        quality_per_rating = dict.fromkeys(QUALITY_RATINGS, 0)
+        for f in quality_rated:
+            if f.quality_rating in quality_per_rating:
+                quality_per_rating[f.quality_rating] += 1
+
+        strategy_per_rating = dict.fromkeys(STRATEGY_RATINGS, 0)
+        for f in strategy_rated:
+            if f.strategy_rating in strategy_per_rating:
+                strategy_per_rating[f.strategy_rating] += 1
 
         unreviewed_count = sum(1 for f in all_fb if f.review_status == "unreviewed")
 
+        # Axis-agnostic "was this answer rated at all" share — any rating on either
+        # axis counts (a comment-only row does not).
+        rated_any = [f for f in all_fb if f.quality_rating is not None or f.strategy_rating is not None]
         source_share = {"faq": 0, "llm": 0, "fallback": 0}
-        for f in rated:
+        for f in rated_any:
             ctx = await self._ctx_store.get(f.answer_context_id)
             if ctx is None:
                 continue
@@ -501,12 +567,25 @@ class FeedbackService:
                 source_share["fallback"] += 1
 
         eligible = await self._ctx_store.list_eligible(bot_id=bot_id)
-        rated_context_ids = {f.answer_context_id for f in all_fb}
-        no_feedback_count = sum(1 for ctx in eligible if ctx.id not in rated_context_ids)
+        any_feedback_context_ids = {f.answer_context_id for f in all_fb}
+        no_feedback_count = sum(1 for ctx in eligible if ctx.id not in any_feedback_context_ids)
+
+        quality_rated_context_ids = {f.answer_context_id for f in quality_rated}
+        strategy_rated_context_ids = {f.answer_context_id for f in strategy_rated}
+        answers_without_quality_rating = sum(1 for ctx in eligible if ctx.id not in quality_rated_context_ids)
+        answers_without_strategy_rating = sum(1 for ctx in eligible if ctx.id not in strategy_rated_context_ids)
 
         return {
-            "total_rated": len(rated),
-            "per_rating": per_rating,
+            "quality": {
+                "total_rated": len(quality_rated),
+                "per_rating": quality_per_rating,
+                "answers_without_quality_rating": answers_without_quality_rating,
+            },
+            "strategy": {
+                "total_rated": len(strategy_rated),
+                "per_rating": strategy_per_rating,
+                "answers_without_strategy_rating": answers_without_strategy_rating,
+            },
             "unreviewed_count": unreviewed_count,
             "source_share": source_share,
             "no_feedback_count": no_feedback_count,

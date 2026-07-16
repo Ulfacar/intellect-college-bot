@@ -185,7 +185,8 @@ async def _cmd_bot(bot_id: str, external_user_id: str, external_chat_id: str) ->
 async def _cmd_feedback(bot_id: str, external_user_id: str, external_chat_id: str, args: str) -> str:
     """Increment 7 (finishes the Increment-4 stub, §10): attaches `<текст>` as a
     `Feedback.comment` on the LAST automatic `answer_context` of the current session
-    (creating the Feedback row if none exists yet — rating stays unset). Never calls
+    (creating the Feedback row if none exists yet — quality_rating/strategy_rating stay
+    unset, comment saves independently of both axes, Increment 7.1). Never calls
     FAQ/LLM, never changes qualification/lead_status."""
     comment = args.strip()
     if not comment:
