@@ -470,6 +470,114 @@ class AiAnswerLog(Base):
     )
 
 
+class AnswerContext(Base):
+    """Increment 7 telegram-pilot: unified feedback anchor for EVERY automatic answer
+    (FAQ match, LLM sent, safe_fallback, budget_fallback, model_error_fallback,
+    handoff_only) — see `docs/telegram-pilot-implementation-plan.md` Increment 7 and
+    `app/core/feedback_service.py`. Additive — does NOT replace or touch
+    `faq_kb_answer_log` (`FaqKbAnswerLog` above) or `ai_answer_log` (`AiAnswerLog`
+    above), both of which keep writing exactly as before; this is the ADDITIONAL
+    canonical row every automatic Telegram-pilot reply gets, specifically so a
+    `feedback_token` can be minted BEFORE the reply is sent and attached to an inline
+    keyboard (`app/channels/telegram.py`).
+
+    Written EXCLUSIVELY by `app/integrations/panel/answer_context_store.py`, called
+    from the send-wrapping helpers in `app/core/telegram_commands.py` (FAQ/handoff/
+    budget_fallback sends) and `app/core/ai_reply.py` (LLM/validator/model-error
+    sends) — never directly from a webhook handler.
+
+    NEVER stores: API keys, the full system prompt, the webhook secret, extra PII, or
+    the raw BLOCKED model reply (`reply_text` for a `validator_blocked` outcome is the
+    SAFE fallback text actually sent, never the raw model output — see
+    `app/core/pilot_validator.py::SAFE_FALLBACK_TEXT`)."""
+
+    __tablename__ = "answer_context"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("pilot_conversations.id"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True)
+    session_id: Mapped[str] = mapped_column(String(64), default="")
+    bot_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    channel: Mapped[str] = mapped_column(String(32), default="telegram")
+    # the client's Telegram user_id — needed to re-verify a callback server-side (§7).
+    telegram_tester_id: Mapped[str] = mapped_column(String(64), default="")
+    chat_id: Mapped[str] = mapped_column(String(64), default="")
+    client_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_client_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bot_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_bot_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # faq | llm | safe_fallback | handoff | budget_fallback | model_error_fallback
+    source: Mapped[str] = mapped_column(String(24), default="")
+    faq_entry_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    faq_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    matched_variant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    match_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    knowledge_entry_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    reply_text: Mapped[str] = mapped_column(Text, default="")
+    intent: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    applied_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lead_temperature: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bot_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    dialog_owner: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    validator_violations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # faq_answered | llm_answered | safe_fallback | validator_blocked | budget_fallback
+    # | model_error_fallback | handoff_only
+    outcome: Mapped[str] = mapped_column(String(24), default="", index=True)
+    feedback_token: Mapped[str] = mapped_column(String(24), default="", unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Feedback(Base):
+    """Increment 7 telegram-pilot: one tester's rating/comment on ONE `AnswerContext`
+    row. `rating` and `review_status` are SEPARATE axes (what the tester said vs where
+    the review workflow stands) — see `app/core/feedback_service.py`.
+    `UNIQUE(answer_context_id, telegram_tester_id)` — a re-rating UPDATEs this same
+    row (§8 idempotency), it never inserts a second one."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    answer_context_id: Mapped[int] = mapped_column(ForeignKey("answer_context.id"), index=True)
+    conversation_id: Mapped[int | None] = mapped_column(ForeignKey("pilot_conversations.id"), nullable=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), nullable=True)
+    session_id: Mapped[str] = mapped_column(String(64), default="")
+    bot_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    telegram_tester_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # correct | inaccurate | incorrect | should_push | should_not_push | should_handoff
+    rating: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_intent: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expected_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expected_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # unreviewed | in_review | fixed | dismissed
+    review_status: Mapped[str] = mapped_column(String(16), default="unreviewed", index=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_feedback_answer_context_tester", "answer_context_id", "telegram_tester_id", unique=True),
+    )
+
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 

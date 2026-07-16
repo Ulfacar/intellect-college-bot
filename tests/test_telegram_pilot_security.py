@@ -65,6 +65,9 @@ class _FakeAdapter:
     async def send(self, chat_id, text, **kw):
         return None
 
+    async def answer_callback(self, callback_query_id, text="", *, show_alert=False):
+        return None
+
 
 def _inject_bot(bot_id, secret=""):
     orch = _RecordingOrch()

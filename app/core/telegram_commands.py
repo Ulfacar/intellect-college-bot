@@ -45,7 +45,7 @@ from typing import Any
 from app.channels.base import Message
 from app.core import ai_reply, budget, telegram_sessions
 from app.core.conversation_service import ConversationService
-from app.integrations.panel.audit_store import get_audit_store
+from app.core.feedback_service import FeedbackService
 from app.integrations.panel.store import get_conversation_store
 
 log = logging.getLogger("telegram_commands")
@@ -62,7 +62,7 @@ FAQ_HANDOFF_SAFE_PHRASE = (
     "Этот вопрос лучше уточнит менеджер приёмной комиссии — передала ему ваш диалог."
 )
 
-COMMANDS: set[str] = {"/newtest", "/reset", "/status", "/manager", "/bot", "/feedback", "/help"}
+COMMANDS: set[str] = {"/newtest", "/reset", "/status", "/manager", "/bot", "/feedback", "/cancel", "/help"}
 
 HELP_TEXT = (
     "Доступные команды тест-пилота:\n"
@@ -71,8 +71,12 @@ HELP_TEXT = (
     "/status — показать текущее состояние сессии\n"
     "/manager — имитировать запрос менеджера (бот замолкает)\n"
     "/bot — вернуть диалог боту\n"
-    "/feedback <текст> — оставить комментарий тестировщика\n"
-    "/help — этот список"
+    "/feedback <текст> — привязать комментарий к последнему ответу бота\n"
+    "/cancel — отменить ожидание комментария после кнопки «Комментарий»\n"
+    "/help — этот список\n"
+    "\n"
+    "Кнопки под ответами бота оценивают именно этот ответ: ✅/⚠️/❌ — качество ответа; "
+    "🔥/🧊 — надо ли было здесь дожимать клиента; 👤 — бот должен был передать менеджеру."
 )
 
 UNKNOWN_COMMAND_TEXT = (
@@ -179,19 +183,30 @@ async def _cmd_bot(bot_id: str, external_user_id: str, external_chat_id: str) ->
 
 
 async def _cmd_feedback(bot_id: str, external_user_id: str, external_chat_id: str, args: str) -> str:
+    """Increment 7 (finishes the Increment-4 stub, §10): attaches `<текст>` as a
+    `Feedback.comment` on the LAST automatic `answer_context` of the current session
+    (creating the Feedback row if none exists yet — rating stays unset). Never calls
+    FAQ/LLM, never changes qualification/lead_status."""
     comment = args.strip()
     if not comment:
         return "Напишите комментарий после команды, например: /feedback ответ неточный"
     session = await telegram_sessions.ensure_active_session(
         bot_id, external_user_id, external_chat_id=external_chat_id,
     )
-    lead = session.lead
-    await get_audit_store().record(
-        lead_id=(lead.id if lead else None), conversation_id=session.conversation.id,
-        event_type="test_note", metadata={"comment": comment}, source="telegram_test",
-        actor=f"telegram_tester:{external_user_id}",
+    return await FeedbackService().attach_feedback_command_comment(
+        bot_id=bot_id, tester_id=external_user_id, session_id=session.conversation.session_id, comment=comment,
     )
-    return "Комментарий сохранён. Полная оценка ответа появится на следующем этапе пилота."
+
+
+async def _cmd_cancel(bot_id: str, external_user_id: str, external_chat_id: str) -> str:
+    """Increment 7 (§9): clears a pending «💬 Комментарий» wait, if any. Never reaches
+    FAQ/LLM either way — a pure in-memory state clear."""
+    session = await telegram_sessions.ensure_active_session(
+        bot_id, external_user_id, external_chat_id=external_chat_id,
+    )
+    return FeedbackService().clear_pending_for_cancel(
+        bot_id, external_user_id, session.conversation.session_id,
+    )
 
 
 async def handle_command(
@@ -213,6 +228,8 @@ async def handle_command(
         return await _cmd_manager(bot_id, external_user_id, external_chat_id)
     if command == "/bot":
         return await _cmd_bot(bot_id, external_user_id, external_chat_id)
+    if command == "/cancel":
+        return await _cmd_cancel(bot_id, external_user_id, external_chat_id)
     return await _cmd_feedback(bot_id, external_user_id, external_chat_id, args)
 
 
@@ -250,10 +267,19 @@ def _extract_client_message_id(msg: Message) -> str | None:
     return str(mid) if mid is not None else None
 
 
-async def _send_faq_reply(msg: Message, bot_id: str, adapter: Any, text: str) -> None:
+async def _send_faq_reply(
+    msg: Message, bot_id: str, adapter: Any, text: str, *, reply_markup: dict[str, Any] | None = None,
+) -> tuple[str | None, str | None]:
     """Send + log a deterministic FAQ answer/handoff phrase — mirrors
     `Orchestrator._reply` (pending -> send -> sent/failed) so the legacy panel shows the
-    same delivery-status lifecycle as the LLM path, without importing orchestrator.py."""
+    same delivery-status lifecycle as the LLM path, without importing orchestrator.py.
+
+    Increment 7: optional `reply_markup` (the plain dict
+    `feedback_service.build_feedback_keyboard` returns) is passed straight through to
+    the channel adapter — `None` (the default) sends a plain message exactly as
+    before. Returns `(panel_message_id, provider_message_id)` so callers can attach
+    them onto the just-created `answer_context` row (see `_try_faq_reply` /
+    `route_message`)."""
     panel = get_conversation_store()
     key = f"{bot_id}:{msg.user_id}" if bot_id else msg.user_id
     msg_id = 0
@@ -263,10 +289,13 @@ async def _send_faq_reply(msg: Message, bot_id: str, adapter: Any, text: str) ->
         )
     except Exception:  # noqa: BLE001
         log.warning("faq panel log_out failed (bot=%s)", bot_id, exc_info=True)
+    provider_msg_id = None
     try:
-        await adapter.send(msg.chat_id, text)
+        provider_msg_id = await adapter.send(msg.chat_id, text, reply_markup=reply_markup)
         if msg_id:
-            await panel.mark_message_status(message_id=msg_id, status="sent")
+            await panel.mark_message_status(
+                message_id=msg_id, status="sent", set_provider_msg_id=(provider_msg_id or None),
+            )
     except Exception:  # noqa: BLE001 — сбой канала: помечаем failed, диалог не роняем
         if msg_id:
             try:
@@ -274,6 +303,7 @@ async def _send_faq_reply(msg: Message, bot_id: str, adapter: Any, text: str) ->
             except Exception:  # noqa: BLE001
                 pass
         log.warning("faq reply send failed (bot=%s)", bot_id, exc_info=True)
+    return (str(msg_id) if msg_id else None), provider_msg_id
 
 
 async def _try_faq_reply(
@@ -306,6 +336,8 @@ async def _try_faq_reply(
     # now so the manager still sees it live, same as the manager/paused/off gates.
     await _log_to_legacy_panel(msg, bot_id, orchestrator)
 
+    from app.integrations.panel.leadstore import get_lead_store
+
     if result.handoff_only:
         # Matched + handoff_only: NEVER send the stored answer_ru/ky as the final
         # answer. Reuse the same request_manager the /manager command uses:
@@ -315,10 +347,33 @@ async def _try_faq_reply(
             reason=f"faq_entry={result.faq_entry_id}",
         )
         reply_text = FAQ_HANDOFF_SAFE_PHRASE
+        source, outcome = "handoff", "handoff_only"
     else:
         reply_text = result.answer or ""
+        source, outcome = "faq", "faq_answered"
 
-    await _send_faq_reply(msg, bot_id, adapter, reply_text)
+    # Increment 7: fresh bot_phase/dialog_owner (request_manager above may have just
+    # changed them) — same "re-fetch after any owner/phase mutation" convention as
+    # app/core/ai_reply.py's `fresh_conv`.
+    fresh_conv = await get_lead_store().get_conversation(session.conversation.id) or session.conversation
+
+    feedback = FeedbackService()
+    prepared = await feedback.prepare_answer(
+        bot_id=bot_id, session=session, channel=msg.channel, telegram_tester_id=msg.user_id, chat_id=msg.chat_id,
+        source=source, outcome=outcome, reply_text=reply_text,
+        client_message_id=_extract_client_message_id(msg),
+        faq_entry_id=result.faq_entry_id, faq_version_id=result.faq_version_id,
+        matched_variant_id=result.matched_variant_id, match_type=result.match_type or "",
+        match_score=result.score, language=result.language,
+        bot_phase=fresh_conv.bot_phase, dialog_owner=fresh_conv.dialog_owner,
+    )
+
+    bot_message_id, provider_bot_message_id = await _send_faq_reply(
+        msg, bot_id, adapter, reply_text, reply_markup=prepared.reply_markup,
+    )
+    await feedback.finalize_answer(
+        prepared.context_id, bot_message_id=bot_message_id, provider_bot_message_id=provider_bot_message_id,
+    )
 
     try:
         await faq_kb.get_faq_kb_store().log_answer(
@@ -376,6 +431,24 @@ async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator
     session = await telegram_sessions.ensure_active_session(
         bot_id, msg.user_id, external_chat_id=msg.chat_id, channel=msg.channel,
     )
+
+    # Increment 7 (§9, §16): a pending «💬 Комментарий» wait takes ABSOLUTE priority
+    # over everything below — checked even before the dialog_owner/off gates, because
+    # it is feedback about a PAST bot answer, not a new question for the bot to
+    # answer. Consumed text NEVER reaches FAQ/LLM/qualification and is NEVER logged
+    # to the legacy panel as a client message (we simply return here, before
+    # `_log_to_legacy_panel` would otherwise run).
+    if msg.kind == "text" and text:
+        consumed, comment_reply = await FeedbackService().try_consume_pending_comment(
+            bot_id=bot_id, tester_id=msg.user_id, session_id=session.conversation.session_id, text=text,
+        )
+        if consumed:
+            try:
+                await adapter.send(msg.chat_id, comment_reply or "")
+            except Exception:  # noqa: BLE001
+                log.warning("pending-comment reply send failed (bot=%s)", bot_id, exc_info=True)
+            return
+
     if session.conversation.dialog_owner in ("manager", "paused"):
         await _log_to_legacy_panel(msg, bot_id, orchestrator)
         return
@@ -402,7 +475,19 @@ async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator
     await _log_to_legacy_panel(msg, bot_id, orchestrator)
 
     if (await budget.is_exhausted(bot_id=bot_id)).exhausted:
-        await _send_faq_reply(msg, bot_id, adapter, ai_reply.BUDGET_EXHAUSTED_FALLBACK)
+        feedback = FeedbackService()
+        prepared = await feedback.prepare_answer(
+            bot_id=bot_id, session=session, channel=msg.channel, telegram_tester_id=msg.user_id, chat_id=msg.chat_id,
+            source="budget_fallback", outcome="budget_fallback", reply_text=ai_reply.BUDGET_EXHAUSTED_FALLBACK,
+            client_message_id=_extract_client_message_id(msg),
+            bot_phase=session.conversation.bot_phase, dialog_owner=session.conversation.dialog_owner,
+        )
+        bot_message_id, provider_bot_message_id = await _send_faq_reply(
+            msg, bot_id, adapter, ai_reply.BUDGET_EXHAUSTED_FALLBACK, reply_markup=prepared.reply_markup,
+        )
+        await feedback.finalize_answer(
+            prepared.context_id, bot_message_id=bot_message_id, provider_bot_message_id=provider_bot_message_id,
+        )
         return
 
     await ai_reply.generate_and_send_reply(

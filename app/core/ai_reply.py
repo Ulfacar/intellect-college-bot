@@ -37,6 +37,7 @@ from app.core import budget, knowledge_retrieval, pilot_prompt, pilot_validator
 from app.core.ai_schema import parse_ai_result
 from app.core.budget import reserve as reserve_budget
 from app.core.conversation_service import ConversationService
+from app.core.feedback_service import FeedbackService
 from app.core.lead_status_service import MANAGER_ONLY, LeadStatusService
 from app.integrations.panel.ai_log_store import get_ai_log_store
 from app.integrations.panel.audit_store import get_audit_store
@@ -121,10 +122,16 @@ async def _build_history_messages(key: str) -> list[dict[str, str]]:
     return buffer
 
 
-async def _send_and_log(*, msg: Any, bot_id: str, adapter: Any, text: str) -> str | None:
+async def _send_and_log(
+    *, msg: Any, bot_id: str, adapter: Any, text: str, reply_markup: dict[str, Any] | None = None,
+) -> tuple[str | None, str | None]:
     """Send + log through the legacy panel — same pending -> sent/failed lifecycle as
-    `Orchestrator._reply`/`telegram_commands._send_faq_reply`. Returns the panel
-    message id (as `bot_message_id` for `ai_answer_log`) or `None`."""
+    `Orchestrator._reply`/`telegram_commands._send_faq_reply`. Returns
+    `(panel_message_id, provider_message_id)` — the panel id is used as
+    `bot_message_id` for BOTH `ai_answer_log` (unchanged) and the Increment 7
+    `answer_context` row; `reply_markup` (optional — the plain dict
+    `feedback_service.build_feedback_keyboard` returns) is passed straight through to
+    the channel adapter, `None` sending a plain message exactly as before."""
     panel = get_conversation_store()
     key = _key(bot_id, msg.user_id)
     msg_id = 0
@@ -134,8 +141,9 @@ async def _send_and_log(*, msg: Any, bot_id: str, adapter: Any, text: str) -> st
         )
     except Exception:  # noqa: BLE001
         log.warning("ai_reply panel log_out failed (bot=%s)", bot_id, exc_info=True)
+    provider_msg_id = None
     try:
-        provider_msg_id = await adapter.send(msg.chat_id, text)
+        provider_msg_id = await adapter.send(msg.chat_id, text, reply_markup=reply_markup)
         if msg_id:
             await panel.mark_message_status(
                 message_id=msg_id, status="sent", set_provider_msg_id=(provider_msg_id or None),
@@ -147,7 +155,36 @@ async def _send_and_log(*, msg: Any, bot_id: str, adapter: Any, text: str) -> st
             except Exception:  # noqa: BLE001
                 pass
         log.warning("ai_reply send failed (bot=%s)", bot_id, exc_info=True)
-    return str(msg_id) if msg_id else None
+    return (str(msg_id) if msg_id else None), provider_msg_id
+
+
+async def _send_tracked(
+    *, msg: Any, bot_id: str, adapter: Any, session: Any, text: str, source: str, outcome: str,
+    client_message_id: str | None = None, **context_fields: Any,
+) -> str | None:
+    """Increment 7: wraps `_send_and_log` with `FeedbackService.prepare_answer`/
+    `finalize_answer` — creates the `answer_context` row (mints `feedback_token`)
+    BEFORE sending, sends with the resulting `reply_markup` (inline feedback buttons,
+    only attached when `settings.telegram_feedback_enabled` and the tester is
+    allowlisted — see `app/core/feedback_service.py`), then attaches the message ids
+    once known. Returns the panel message id, same value `_send_and_log` used to
+    return directly, so every existing `bot_message_id` usage (`ai_answer_log`) keeps
+    working unchanged — this function only ADDS the answer_context write, it does not
+    change the LLM/FAQ business logic."""
+    feedback = FeedbackService()
+    resolved_client_message_id = client_message_id if client_message_id is not None else _extract_client_message_id(msg)
+    prepared = await feedback.prepare_answer(
+        bot_id=bot_id, session=session, channel=msg.channel, telegram_tester_id=msg.user_id, chat_id=msg.chat_id,
+        source=source, outcome=outcome, reply_text=text, client_message_id=resolved_client_message_id,
+        **context_fields,
+    )
+    bot_message_id, provider_bot_message_id = await _send_and_log(
+        msg=msg, bot_id=bot_id, adapter=adapter, text=text, reply_markup=prepared.reply_markup,
+    )
+    await feedback.finalize_answer(
+        prepared.context_id, bot_message_id=bot_message_id, provider_bot_message_id=provider_bot_message_id,
+    )
+    return bot_message_id
 
 
 async def _request_handoff(conversation_id: int, *, reason: str) -> None:
@@ -273,7 +310,11 @@ async def generate_and_send_reply(
         model=model, prompt_version=pilot_prompt.PROMPT_VERSION, request_id=request_id,
     )
     if not reservation.allowed:
-        await _send_and_log(msg=msg, bot_id=bot_id, adapter=adapter, text=BUDGET_EXHAUSTED_FALLBACK)
+        await _send_tracked(
+            msg=msg, bot_id=bot_id, adapter=adapter, session=session, text=BUDGET_EXHAUSTED_FALLBACK,
+            source="budget_fallback", outcome="budget_fallback", model=model, prompt_version=pilot_prompt.PROMPT_VERSION,
+            bot_phase=conv.bot_phase, dialog_owner=conv.dialog_owner,
+        )
         return "budget_exhausted"
 
     log_id = reservation.log_id
@@ -288,7 +329,12 @@ async def generate_and_send_reply(
     if not call_result.ok:
         outcome = _OUTCOME_FOR_ERROR.get(call_result.error or "", "error")
         await _finalize_error(log_id, outcome=outcome, call_result=call_result)
-        await _send_and_log(msg=msg, bot_id=bot_id, adapter=adapter, text=TECHNICAL_ERROR_FALLBACK)
+        await _send_tracked(
+            msg=msg, bot_id=bot_id, adapter=adapter, session=session, text=TECHNICAL_ERROR_FALLBACK,
+            source="model_error_fallback", outcome="model_error_fallback",
+            model=call_result.model or model, prompt_version=pilot_prompt.PROMPT_VERSION,
+            latency_ms=call_result.latency_ms, bot_phase=conv.bot_phase, dialog_owner=conv.dialog_owner,
+        )
         if outcome in _SCHEMA_ERROR_OUTCOMES and conv.id is not None:
             await _request_handoff(conv.id, reason=f"ai_error:{call_result.error}")
         return outcome
@@ -297,7 +343,12 @@ async def generate_and_send_reply(
         ai_result = parse_ai_result(call_result.arguments or {})
     except ValidationError:
         await _finalize_error(log_id, outcome="schema_error", call_result=call_result)
-        await _send_and_log(msg=msg, bot_id=bot_id, adapter=adapter, text=pilot_validator.SAFE_FALLBACK_TEXT)
+        await _send_tracked(
+            msg=msg, bot_id=bot_id, adapter=adapter, session=session, text=pilot_validator.SAFE_FALLBACK_TEXT,
+            source="model_error_fallback", outcome="model_error_fallback",
+            model=call_result.model or model, prompt_version=pilot_prompt.PROMPT_VERSION,
+            latency_ms=call_result.latency_ms, bot_phase=conv.bot_phase, dialog_owner=conv.dialog_owner,
+        )
         await _request_handoff(conv.id, reason="ai_schema_validation_error")
         return "schema_error"
 
@@ -316,7 +367,16 @@ async def generate_and_send_reply(
             )
         except Exception:  # noqa: BLE001
             log.warning("ai_reply validator audit write failed", exc_info=True)
-        await _send_and_log(msg=msg, bot_id=bot_id, adapter=adapter, text=pilot_validator.SAFE_FALLBACK_TEXT)
+        usage = call_result.usage or structured_llm.UsageInfo()
+        await _send_tracked(
+            msg=msg, bot_id=bot_id, adapter=adapter, session=session, text=pilot_validator.SAFE_FALLBACK_TEXT,
+            source="safe_fallback", outcome="validator_blocked",
+            model=call_result.model or model, prompt_version=pilot_prompt.PROMPT_VERSION,
+            knowledge_entry_ids=[item.entry_id for item in retrieved], language=ai_result.language,
+            validator_violations=validation.critical, latency_ms=call_result.latency_ms,
+            input_tokens=usage.input_tokens, output_tokens=usage.output_tokens, total_tokens=usage.total_tokens,
+            bot_phase=conv.bot_phase, dialog_owner=conv.dialog_owner,
+        )
         await _request_handoff(conv.id, reason="validator_blocked")
         return "validator_blocked"
 
@@ -342,15 +402,26 @@ async def generate_and_send_reply(
             lead.id, ai_summary=ai_result.summary_update.strip()[:SUMMARY_MAX_LEN],
         )
 
-    bot_message_id = await _send_and_log(msg=msg, bot_id=bot_id, adapter=adapter, text=validation.clean_reply)
+    usage = call_result.usage or structured_llm.UsageInfo()
+    cost = usage.cost if usage.cost is not None else _estimate_cost(usage)
+
+    bot_message_id = await _send_tracked(
+        msg=msg, bot_id=bot_id, adapter=adapter, session=session, text=validation.clean_reply,
+        source="llm", outcome="llm_answered", model=call_result.model, prompt_version=pilot_prompt.PROMPT_VERSION,
+        knowledge_entry_ids=[item.entry_id for item in retrieved], language=ai_result.language,
+        intent=ai_result.classification.intent, confidence=ai_result.classification.confidence,
+        evidence=ai_result.classification.evidence, suggested_status=ai_result.classification.suggested_status,
+        applied_status=applied_status, lead_temperature=ai_result.classification.lead_temperature,
+        bot_phase=fresh_conv.bot_phase, dialog_owner=fresh_conv.dialog_owner,
+        input_tokens=usage.input_tokens, output_tokens=usage.output_tokens, total_tokens=usage.total_tokens,
+        cost=cost, cost_source=usage.cost_source, latency_ms=call_result.latency_ms,
+    )
 
     if ai_result.classification.should_handoff:
         await _request_handoff(
             conv.id, reason=ai_result.classification.handoff_reason or ai_result.classification.intent,
         )
 
-    usage = call_result.usage or structured_llm.UsageInfo()
-    cost = usage.cost if usage.cost is not None else _estimate_cost(usage)
     try:
         await get_ai_log_store().finalize(
             log_id, outcome="sent", latency_ms=call_result.latency_ms, retry_count=call_result.retry_count,

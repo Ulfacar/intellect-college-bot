@@ -34,6 +34,11 @@ EVENT_TYPES = {
     # Increment 4 (telegram-pilot): /feedback comment, saved via existing audit_store
     # (see app/core/telegram_commands.py) — no separate Feedback model in this increment.
     "test_note",
+    # Increment 7 (telegram-pilot): feedback/answer-context events — see
+    # app/core/feedback_service.py. Technical audit only (codes/reasons, never raw
+    # text/PII) — the actual rating/comment payload lives in the `feedback` table.
+    "feedback_recorded", "feedback_rating_changed", "feedback_comment_saved",
+    "feedback_callback_rejected", "feedback_review_updated",
 }
 
 

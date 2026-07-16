@@ -20,8 +20,9 @@ from app.channels.wappi import (
     parse_delivery_status,
 )
 from app.config import BotConfig, settings
-from app.core import observ, telegram_commands
+from app.core import allowlist, observ, telegram_commands
 from app.core.bots import registry
+from app.core.feedback_service import FeedbackService
 from app.core.orchestrator import Orchestrator
 from app.integrations.panel.store import get_conversation_store
 
@@ -220,10 +221,15 @@ async def telegram_test_webhook(bot_id: str, request: Request):
     пользователь вне allowlist не приводит к созданию Conversation/Lead и вызову LLM.
 
     Increment 4: дедуп по update_id — ПЕРВЫЙ гейт (до любого побочного эффекта команд);
-    затем игнорируем не поддерживаемые типы апдейтов (callback_query/edited_message/
-    не-приватные чаты — без создания Conversation/Lead, без вызова LLM, §9 ТЗ); только
-    приватные текстовые/медиа `message`-апдейты allowlisted-пользователей идут в
-    `telegram_commands.route_message` (команды + гейт dialog_owner + оркестратор)."""
+    затем игнорируем не поддерживаемые типы апдейтов (edited_message/не-приватные чаты
+    — без создания Conversation/Lead, без вызова LLM, §9 ТЗ); только приватные
+    текстовые/медиа `message`-апдейты allowlisted-пользователей идут в
+    `telegram_commands.route_message` (команды + гейт dialog_owner + оркестратор).
+
+    Increment 7: `callback_query` (inline feedback buttons) — дедуп + allowlist по
+    `callback.from.id` (те же гейты, что у обычных апдейтов), затем маршрутизация в
+    `FeedbackService.handle_callback` (§7 переверяет авторизацию с нуля сама; НИКОГДА
+    не зовёт FAQ/OpenRouter/route_message — см. app/core/feedback_service.py)."""
     entry = _telegram_test.get(bot_id)
     if entry is None:
         return JSONResponse({"ok": False, "reason": "unknown_bot"}, status_code=404)
@@ -235,7 +241,17 @@ async def telegram_test_webhook(bot_id: str, request: Request):
         return {"ok": True, "dedup": True}
     kind = _tg_update_kind(raw)
     if kind == "callback_query":
-        return {"ok": True, "skipped": "callback_query"}
+        cb = raw.get("callback_query") or {}
+        cb_uid = (cb.get("from") or {}).get("id")
+        cb_chat = ((cb.get("message") or {}).get("chat") or {}).get("id")
+        if not allowlist.is_allowed(cb_uid, cb_chat):
+            log.info("telegram allowlist reject (callback, bot=%s)", bot_id)  # без текста/ПДн
+            return {"ok": True, "skipped": "not_allowed"}
+        await FeedbackService().handle_callback(
+            bot_id=bot_id, adapter=adapter, callback_query_id=str(cb.get("id", "")),
+            tester_id=cb_uid, chat_id=cb_chat, data=str(cb.get("data", "")),
+        )
+        return {"ok": True}
     if kind == "edited_message":
         log.info("telegram edited_message ignored (bot=%s)", bot_id)  # без текста/ПДн
         return {"ok": True, "skipped": "edited_message"}

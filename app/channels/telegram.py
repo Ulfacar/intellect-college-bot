@@ -1,10 +1,25 @@
 """Telegram-адаптер (MVP-канал) на aiogram."""
 from __future__ import annotations
 
+from typing import Any
+
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.channels.base import Message
 from app.config import settings
+
+
+def _build_inline_keyboard(markup: dict[str, Any]) -> InlineKeyboardMarkup:
+    """Increment 7: converts the plain Bot-API-shaped dict business logic builds
+    (`app/core/feedback_service.py::build_feedback_keyboard`) into aiogram's typed
+    `InlineKeyboardMarkup` — business logic stays aiogram-agnostic (and trivially
+    testable with a fake adapter that just records the dict it was given)."""
+    rows = markup.get("inline_keyboard") or []
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=btn["text"], callback_data=btn["callback_data"]) for btn in row]
+        for row in rows
+    ])
 
 
 class TelegramAdapter:
@@ -46,17 +61,31 @@ class TelegramAdapter:
             raw=raw,
         )
 
-    async def send(self, chat_id: str, text: str, **kwargs) -> str | None:
+    async def send(self, chat_id: str, text: str, *, reply_markup: dict[str, Any] | None = None, **kwargs) -> str | None:
         """Sends the message and returns Telegram's `message_id` (as a string) when
         available — Increment 6 (`app/core/ai_reply.py`) records it as
         `ai_answer_log.bot_message_id`/panel `provider_msg_id` for delivery tracing.
         `Orchestrator._reply` already treats this return value as optional
         (`provider or None`), so this is a minimal, backward-compatible extension of
         the existing `ChannelAdapter.send` contract — fake adapters in tests that
-        still return `None` (or nothing) are unaffected."""
-        sent = await self._bot.send_message(chat_id=int(chat_id), text=text, **kwargs)
+        still return `None` (or nothing) are unaffected.
+
+        Increment 7: `reply_markup`, when given, is the plain dict
+        `app/core/feedback_service.py::build_feedback_keyboard` returns — converted to
+        an aiogram `InlineKeyboardMarkup` here (see `_build_inline_keyboard`). `None`
+        (the default) sends a plain message exactly as before — fully backward
+        compatible for every existing caller/fake adapter."""
+        markup = _build_inline_keyboard(reply_markup) if reply_markup else None
+        sent = await self._bot.send_message(chat_id=int(chat_id), text=text, reply_markup=markup, **kwargs)
         message_id = getattr(sent, "message_id", None)
         return str(message_id) if message_id is not None else None
+
+    async def answer_callback(self, callback_query_id: str, text: str = "", *, show_alert: bool = False) -> None:
+        """Increment 7: acks a Telegram `callback_query` (clears the button spinner)
+        — see `app/core/feedback_service.py::_safe_ack`, the only caller."""
+        await self._bot.answer_callback_query(
+            callback_query_id=callback_query_id, text=text or None, show_alert=show_alert,
+        )
 
 
 # Update-type/chat-type helpers (Increment 4 телеграм-пилота) — работают на сыром

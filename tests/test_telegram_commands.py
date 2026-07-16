@@ -61,6 +61,9 @@ class _SendOnlyAdapter:
         self.sent.append(text)
         return None
 
+    async def answer_callback(self, callback_query_id, text="", *, show_alert=False):
+        return None
+
 
 class _WebhookFakeAdapter:
     """Mirrors TelegramAdapter.parse() for webhook-level tests (no real network)."""
@@ -77,6 +80,9 @@ class _WebhookFakeAdapter:
         )
 
     async def send(self, chat_id, text, **kw):
+        return None
+
+    async def answer_callback(self, callback_query_id, text="", *, show_alert=False):
         return None
 
 
@@ -264,14 +270,28 @@ def test_unknown_command_no_llm():
 
 
 # --------------------------------------------------------------------------------------
-# 15. /feedback saved as test_note, never mixed with a normal client message.
+# 15. /feedback attaches a comment to the last automatic answer_context (Increment 7 —
+# finishes the Increment-4 stub), never mixed with a normal client message.
 # --------------------------------------------------------------------------------------
 
 def test_feedback_saved_as_test_note_not_client_message():
     async def scenario():
+        from app.integrations.panel.answer_context_store import get_answer_context_store
+        from app.integrations.panel.feedback_store import get_feedback_store
+
         bot_id, uid = "college_1", "cmd-u15"
         orch = _RecordingOrch()
         adapter = _SendOnlyAdapter()
+
+        # An automatic answer must exist first — /feedback attaches to the LAST one.
+        session = await telegram_sessions.ensure_active_session(bot_id, uid)
+        ctx = await get_answer_context_store().create(
+            conversation_id=session.conversation.id, lead_id=session.lead.id,
+            session_id=session.conversation.session_id, bot_id=bot_id, channel="telegram",
+            telegram_tester_id=uid, chat_id=uid, source="faq", outcome="faq_answered",
+            reply_text="6500$/год", bot_message_id="1",
+        )
+
         msg = Message(channel="telegram", user_id=uid, chat_id=uid,
                      text="/feedback ответ неточный", kind="text")
 
@@ -281,15 +301,30 @@ def test_feedback_saved_as_test_note_not_client_message():
         conv, lead = await telegram_sessions.get_active_session(bot_id, uid)
         assert conv is not None
 
+        fb = await get_feedback_store().get_by_answer_context_and_tester(ctx.id, uid)
+        assert fb is not None
+        assert fb.comment == "ответ неточный"
+        assert fb.rating is None  # /feedback never invents a rating value
+
         audit = await get_audit_store().list_for_lead(lead.id)
-        notes = [a for a in audit if a.event_type == "test_note"]
+        notes = [a for a in audit if a.event_type == "feedback_comment_saved"]
         assert len(notes) == 1
-        assert notes[0].metadata == {"comment": "ответ неточный"}
-        assert notes[0].conversation_id == conv.id
 
         # feedback text is NEVER logged into the legacy panel as a client message.
         panel_conv = await get_conversation_store().get(f"{bot_id}:{uid}")
         assert panel_conv is None
+
+    _run(scenario())
+
+
+def test_feedback_command_without_automatic_answer_gives_honest_reply():
+    async def scenario():
+        bot_id, uid = "college_1", "cmd-u15c"
+        reply = await telegram_commands.handle_command(
+            bot_id=bot_id, external_user_id=uid, external_chat_id=uid, command="/feedback", args="что-то не так",
+        )
+        from app.core.feedback_service import NO_AUTOMATIC_ANSWER_TEXT
+        assert reply == NO_AUTOMATIC_ANSWER_TEXT
 
     _run(scenario())
 
@@ -355,7 +390,10 @@ def test_repeated_update_id_does_not_repeat_newtest(monkeypatch):
 
 
 # --------------------------------------------------------------------------------------
-# 18/19. callback_query -> ignored, no Conversation, no LLM.
+# 18/19. callback_query -> routed to FeedbackService (Increment 7), NEVER to
+# FAQ/LLM/route_message; an unknown feedback token is safely rejected and creates no
+# Conversation/Lead (see tests/test_feedback_security.py for the full authorization
+# matrix — this is just the webhook-level "still never reaches the orchestrator" check).
 # --------------------------------------------------------------------------------------
 
 def test_callback_query_ignored_no_conversation_no_llm(monkeypatch):
@@ -373,12 +411,33 @@ def test_callback_query_ignored_no_conversation_no_llm(monkeypatch):
         with TestClient(m.app) as client:
             resp = client.post("/webhook/telegram/cbbot", json=body)
         assert resp.status_code == 200
-        assert resp.json().get("skipped") == "callback_query"
-        assert orch.handled == []
+        assert resp.json() == {"ok": True}
+        assert orch.handled == []  # NEVER routed to FAQ/LLM/route_message
         conv, _lead = _run(telegram_sessions.get_active_session("cbbot", "8181"))
-        assert conv is None
+        assert conv is None  # the callback handler never creates a Conversation/Lead
     finally:
         _remove_bot("cbbot", 3001)
+
+
+def test_callback_query_from_non_allowlisted_user_skipped(monkeypatch):
+    monkeypatch.setattr(settings, "telegram_allowed_user_ids", [8484])
+    monkeypatch.setattr(settings, "webhook_secret", "")
+    orch = _inject_bot("cbbot2", secret="")
+    try:
+        body = {
+            "update_id": 3005,
+            "callback_query": {
+                "id": "cb2", "from": {"id": 9999},
+                "message": {"chat": {"id": 9999}}, "data": "fb:whatever:ok",
+            },
+        }
+        with TestClient(m.app) as client:
+            resp = client.post("/webhook/telegram/cbbot2", json=body)
+        assert resp.status_code == 200
+        assert resp.json().get("skipped") == "not_allowed"
+        assert orch.handled == []
+    finally:
+        _remove_bot("cbbot2", 3005)
 
 
 # --------------------------------------------------------------------------------------

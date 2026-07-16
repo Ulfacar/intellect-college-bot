@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     telegram_allowed_user_ids: list[int] = []
     telegram_allowed_chat_ids: list[int] = []
     webhook_secret: str = ""
+    # Increment 7: inline feedback buttons under automatic answers on the pilot
+    # `/webhook/telegram/{bot_id}` route ONLY. Default False — MUST NOT be auto-enabled
+    # in production (see .env.example note); a bot with no telegram_bots configured
+    # never shows buttons regardless of this flag (single-bot prod route never calls
+    # the feedback-wrapped send points at all — see app/core/telegram_commands.py).
+    telegram_feedback_enabled: bool = False
 
     @field_validator("telegram_allowed_user_ids", "telegram_allowed_chat_ids", mode="before")
     @classmethod
