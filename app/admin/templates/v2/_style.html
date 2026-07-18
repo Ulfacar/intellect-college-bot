@@ -132,6 +132,12 @@
              transition: background var(--t); }
   .dlg-row:hover, .dlg-row:focus-visible { background: var(--surface-2); outline: none; }
   .dlg-row.active { background: var(--accent-soft); }
+  /* Archived rows (owner §4/R4) — visually distinct from active ones: muted/faded, with
+     an explicit "В архиве" chip (added in _dialog_list.html) rather than the bulk-select
+     checkbox that active rows show in its place. */
+  .dlg-row-archived { opacity: .68; }
+  .dlg-row-archived:hover, .dlg-row-archived:focus-visible { opacity: 1; }
+  .dlg-row-archived .name { text-decoration: line-through; text-decoration-color: var(--faint); }
   .dlg-row .avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
                       font-weight: 700; font-size: 13px; color: #fff; }
   .dlg-row .body { min-width: 0; flex: 1; }
@@ -178,6 +184,8 @@
   .btn-send { width: 44px; height: 44px; border-radius: 10px; background: var(--accent-2); color: #fff; border: none;
               display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
   .btn-send:hover { background: #2560C4; }
+  /* Видимое состояние во время отправки (кнопка disabled в v2SendMessage) — Fable P3. */
+  .btn-send:disabled { opacity: .5; cursor: default; }
   .composer-hint { padding: 0 var(--sp-4) var(--sp-3); color: var(--faint); font-size: 11px; }
   .quick-replies { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 var(--sp-4) var(--sp-2); }
   .quick-replies .qr-extra { display: none; }
@@ -237,6 +245,7 @@
            padding: 11px 15px; font-size: 13px; font-weight: 600; max-width: 320px; animation: toast-in .18s ease; }
   .toast--error { border-color: rgba(220,38,38,.3); color: var(--danger); background: var(--danger-soft); }
   .toast--ok { border-color: rgba(5,150,105,.3); color: var(--mode-bot); background: var(--mode-bot-soft); }
+  .toast--warn { border-color: rgba(251,191,36,.35); color: var(--mode-manager); background: var(--mode-manager-soft); }
   @keyframes toast-in { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
   /* Mobile scrim behind the lead slide-in panel — tap to close. */
@@ -311,6 +320,9 @@
     body.lead-open .lead-scrim { display: block; }
     .composer-wrap { position: sticky; bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
     .chat-pane { height: 100%; }
+    /* iOS Safari зумит страницу при фокусе на поле < 16px — на телефоне поднимаем шрифт
+       ввода до 16px, чтобы тап в composer/поиск не дёргал масштаб (Fable P2). */
+    .composer textarea, .search input { font-size: 16px; }
   }
   @media (min-width: 861px) { .lead-pane { display: block !important; } }
 

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intellect College — статус системы (v2 прототип)</title>
+  {% include "_style.html" %}
+  <style>
+    /* Standalone page (like login.html) — NOT part of the shell.html SPA, so it needs
+       its own toast layer + doAction() wrapper (owner §1 R1 contract), duplicated
+       intentionally rather than factored into a shared partial to keep shell.html's
+       existing wiring untouched (isolation-first, per the increment brief). */
+    .wrap { padding: var(--sp-6) var(--sp-5); max-width: 960px; margin: 0 auto; }
+    .topbar { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-5); height: 52px;
+              background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+    .topbar a { color: var(--accent); text-decoration: none; font-weight: 600; font-size: 13.5px; }
+    .topbar .sp { flex: 1; }
+    h1 { font-size: 19px; margin: 0 0 var(--sp-5); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-6); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-4); }
+    .card .l { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .card .v { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .dot.ok { background: var(--mode-bot); } .dot.bad { background: var(--danger); }
+    .dot.warn { background: var(--mode-manager); } .dot.off { background: var(--mode-paused); }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+             padding: var(--sp-4); margin-bottom: var(--sp-4); }
+    .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+                margin: 0 0 var(--sp-3); font-weight: 700; }
+    .bot-row { display: flex; gap: var(--sp-4); align-items: flex-start; padding: var(--sp-3) 0;
+               border-top: 1px solid var(--border); }
+    .bot-row:first-of-type { border-top: none; }
+    .bot-text { flex: 1; min-width: 0; }
+    .bot-title { font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .bot-meta { color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.5; }
+    .bot-errs { color: var(--danger); font-size: 12.5px; margin-top: 4px; }
+    .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: var(--border-2); border-radius: 26px; transition: .2s; }
+    .slider:before { content: ""; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px;
+                     background: #fff; border-radius: 50%; transition: .2s; }
+    .switch input:checked + .slider { background: var(--mode-bot); }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .switch input:disabled + .slider { opacity: .5; cursor: default; }
+    .state-tag { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+    .state-tag.on { background: var(--mode-bot-soft); color: var(--mode-bot); }
+    .state-tag.off { background: var(--surface-2); color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    th { color: var(--muted); font-weight: 500; }
+    .mono { font-family: var(--mono); }
+    .muted { color: var(--muted); }
+    #toast-stack { position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+  </style>
+</head>
+<body class="v2">
+  <header class="topbar">
+    <a href="/admin-v2">← Инбокс (v2)</a>
+    <b>Статус системы</b>
+    <span class="sp"></span>
+    <span class="muted">{{ manager.name if manager else '' }}</span>
+  </header>
+  <div class="wrap">
+    <h1>Состояние сервиса</h1>
+
+    <div class="grid">
+      <div class="card">
+        <div class="l">LLM (OpenRouter)</div>
+        <div class="v"><span class="dot {{ 'ok' if s.llm_enabled else 'bad' }}"></span>{{ 'подключён' if s.llm_enabled else 'нет ключа' }}</div>
+      </div>
+      <div class="card">
+        <div class="l">Модель</div>
+        <div class="v mono" style="font-size:13px">{{ s.model_main }}</div>
+      </div>
+      <div class="card">
+        <div class="l">Главный рубильник</div>
+        <div class="v"><span class="dot {{ 'ok' if s.global_on else 'off' }}"></span>{{ 'бот отвечает' if s.global_on else 'бот выключен для ВСЕХ' }}</div>
+      </div>
+      <div class="card">
+        <div class="l">Бюджет OpenRouter</div>
+        <div class="v mono" style="font-size:13px">
+          день: {{ (s.daily_limit ~ ' $') if s.daily_limit else 'без лимита' }} · месяц: {{ (s.monthly_limit ~ ' $') if s.monthly_limit else 'без лимита' }}
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div>
+          <h2 style="margin-bottom:4px">Главный рубильник (все боты)</h2>
+          <div class="muted" style="font-size:12.5px;max-width:520px">
+            Выключение остановит автоответы бота во всех воронках сразу. Ручные ответы
+            менеджеров из панели останутся доступны.
+          </div>
+        </div>
+        <label class="switch" title="Включить/выключить всех ботов">
+          <input type="checkbox" id="global-toggle" {{ 'checked' if s.global_on else '' }}
+                 onchange="v2SystemToggleGlobal(this)">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Боты</h2>
+      {% for b in bots %}
+      <div class="bot-row">
+        <label class="switch" title="Включить/выключить авто-ответы этого бота">
+          <input type="checkbox" {{ 'checked' if b.individual_on else '' }}
+                 onchange="v2SystemToggleBot('{{ b.id }}', this)">
+          <span class="slider"></span>
+        </label>
+        <div class="bot-text">
+          <div class="bot-title">
+            <span class="mono">{{ b.id }}</span> {{ b.title }}
+            <span class="state-tag {{ 'on' if b.effective else 'off' }}">
+              {{ 'ОТВЕЧАЕТ' if b.effective else 'МОЛЧИТ' }}
+            </span>
+          </div>
+          {% if not b.effective %}
+          <div class="bot-meta">Причина: {{ b.silent_reason }}</div>
+          {% endif %}
+          <div class="bot-meta">
+            Потрачено сегодня: {{ '%.2f'|format(b.budget.daily_spent) }} $
+            {% if b.budget.daily_limit %}из {{ '%.2f'|format(b.budget.daily_limit) }} $ (день){% endif %}
+            · за месяц: {{ '%.2f'|format(b.budget.monthly_spent) }} $
+            {% if b.budget.monthly_limit %}из {{ '%.2f'|format(b.budget.monthly_limit) }} $ (месяц){% endif %}
+            {% if b.budget.exhausted %}<span style="color:var(--danger);font-weight:700">· бюджет исчерпан</span>{% endif %}
+          </div>
+          {% if b.config_errors %}
+          <div class="bot-errs">⚠ {{ b.config_errors|join('; ') }}</div>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="muted">Боты не настроены.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="toast-stack" aria-live="polite"></div>
+
+  <script>
+    /* ---------------- toast + doAction (same contract as shell.html, owner §1 R1) --- */
+    function toast(kind, msg) {
+      var stack = document.getElementById('toast-stack');
+      if (!stack) return;
+      var el = document.createElement('div');
+      el.className = 'toast toast--' + (kind === 'success' ? 'ok' : kind === 'warning' ? 'warn' : 'error');
+      el.textContent = msg;
+      stack.appendChild(el);
+      setTimeout(function () { el.remove(); }, kind === 'success' ? 2600 : 4200);
+    }
+    function _v2StatusMessage(status, context) {
+      if (status === 404) return 'Состояние изменилось, обновите страницу';
+      if (status === 409) return 'Конфликт — кто-то уже изменил это значение';
+      if (status >= 500 || status === 0) return 'Сервер временно недоступен';
+      return context || 'Не удалось выполнить действие';
+    }
+    async function doAction(url, opts) {
+      opts = opts || {};
+      try {
+        var r = await fetch(url, {
+          method: opts.method || 'POST',
+          headers: Object.assign({ 'HX-Request': 'true' }, opts.headers || {}),
+          body: opts.body,
+        });
+        if (!r.ok) { toast('error', _v2StatusMessage(r.status, opts.errorContext)); return { ok: false, status: r.status }; }
+        return { ok: true, status: r.status, response: r };
+      } catch (err) {
+        toast('error', _v2StatusMessage(0, opts.errorContext));
+        return { ok: false, status: 0 };
+      }
+    }
+
+    /* ---------------- toggles: reuse EXISTING /admin/flags + /admin/bots routes ----- */
+    async function v2SystemToggleGlobal(el) {
+      var next = el.checked;
+      var warn = next
+        ? 'Включить автоответы бота для всех клиентов?'
+        : 'Выключить автоответы бота для ВСЕХ клиентов? Ручные ответы менеджеров останутся доступны.';
+      if (!confirm(warn)) { el.checked = !next; return; }
+      var res = await doAction('/admin/flags/bots_enabled', {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'on=' + (next ? '1' : '0'),
+        errorContext: 'Не удалось переключить главный рубильник',
+      });
+      if (res.ok) { toast('success', next ? 'Бот включён' : 'Бот выключен для всех'); setTimeout(function () { location.reload(); }, 400); }
+      else { el.checked = !next; }
+    }
+    async function v2SystemToggleBot(botId, el) {
+      var next = el.checked;
+      // Выключение отдельного бота останавливает автоответы во всей его воронке —
+      // требуем подтверждения, симметрично глобальному рубильнику (Fable P2).
+      if (!next && !confirm('Выключить автоответы этого бота? Ручные ответы менеджеров останутся доступны.')) {
+        el.checked = true; return;
+      }
+      var res = await doAction('/admin/bots/' + encodeURIComponent(botId) + '/toggle', {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'on=' + (next ? '1' : '0'),
+        errorContext: 'Не удалось переключить бота',
+      });
+      if (res.ok) { toast('success', 'Сохранено'); setTimeout(function () { location.reload(); }, 400); }
+      else { el.checked = !next; }
+    }
+  </script>
+</body>
+</html>

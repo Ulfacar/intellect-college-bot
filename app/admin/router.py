@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 from app.agent.llm import chat, llm_enabled
 from app.channels import outbound
 from app.config import settings
+from app.core import telegram_sessions
 from app.core.branding import quick_replies_for
 from app.core.leadstate import HUMAN_STAGES, STAGE_TO_COLUMN, is_noise, is_silent
 from app.core.state import get_state_store
@@ -201,8 +202,9 @@ def _check_credentials(login: str, password: str) -> dict | None:
 
 
 def _demo_managers() -> list[dict]:
-    """Список менеджеров для кнопок быстрого входа (только при demo_login)."""
-    if not settings.demo_login:
+    """Список менеджеров для кнопок быстрого входа (только при demo_login,
+    force-disabled in production — Increment 8B §11, `settings.demo_login_available()`)."""
+    if not settings.demo_login_available():
         return []
     return [{"login": m.login, "name": m.name or m.login} for m in settings.manager_list()]
 
@@ -218,8 +220,9 @@ async def login_form(request: Request):
 
 @router.post("/login/demo")
 async def login_demo(request: Request, login: str = Form(...)):
-    """Быстрый вход для демо (без пароля). Доступен ТОЛЬКО при settings.demo_login."""
-    if not settings.demo_login:
+    """Быстрый вход для демо (без пароля). Доступен ТОЛЬКО при settings.demo_login_available()
+    — Increment 8B §11: force-disabled when settings.environment == "production"."""
+    if not settings.demo_login_available():
         raise HTTPException(status_code=404, detail="not found")
     mgr = next((m for m in settings.manager_list() if m.login == login), None)
     if mgr is None:
@@ -894,6 +897,71 @@ async def stats(_: dict = Depends(require_admin)):
     })
 
 
+def _split_bot_user(user_id: str) -> tuple[str, str]:
+    """Panel-store user_id is "<bot_id>:<external_user_id>" (see
+    telegram_commands._log_to_legacy_panel). Dev-demo / non-pilot keys may be a bare
+    number with no bot_id — those have no Telegram-pilot session at all."""
+    bot_id, sep, ext = user_id.partition(":")
+    return (bot_id, ext) if sep else ("", user_id)
+
+
+def _is_pilot_conversation(user_id: str, conv) -> bool:
+    """Increment 8B §8 (owner fail-closed rule): a Telegram-pilot conversation is
+    session-aware — its user_id carries a "<bot_id>:<external_user_id>" AND it flows over
+    the telegram channel, so an active pilot session MUST be verifiable. Such a
+    conversation fails CLOSED when the session cannot be checked. Everything else
+    (dev-demo keys without a bot_id, WhatsApp/Bitrix legacy conversations) objectively has
+    no session model and stays fail-OPEN for backward compatibility."""
+    bot_id, ext = _split_bot_user(user_id)
+    return bool(bot_id and ext and (getattr(conv, "channel", "") or "") == "telegram")
+
+
+async def _active_session_id(user_id: str) -> str | None:
+    """Increment 8B §8: current ACTIVE Telegram-pilot session id for this panel
+    conversation. Three distinct outcomes the callers rely on:
+      * ""   — there is definitively NO pilot session (dev-demo / non-pilot key);
+      * None — the lookup could not be performed (backend error) — callers fail CLOSED for
+               a pilot conversation and OPEN for a legacy one (see _assert_manual_reply_allowed);
+      * else — the session_id of the one active session.
+    Read-only. Render sites coerce None/""→"" (an outage must never break rendering)."""
+    bot_id, ext = _split_bot_user(user_id)
+    if not (bot_id and ext):
+        return ""
+    try:
+        active, _ = await telegram_sessions.get_active_session(bot_id, ext)
+    except Exception:  # noqa: BLE001 — surface as None so the guard can fail closed
+        log.warning("active-session lookup failed for %s", user_id, exc_info=True)
+        return None
+    return active.session_id if active else ""
+
+
+async def _assert_manual_reply_allowed(user_id: str, conv, expected_session_id: str) -> None:
+    """Increment 8B §8 — server-side gate raised BEFORE any DB write or external send so a
+    rejected manual reply/resend sends nothing and writes nothing. Identical for /admin and
+    /admin-v2 (both POST the SAME routes) and shared by `send` and `resend`:
+      * archived conversation -> 409 (the v2 composer is also hidden for archived — backstop);
+      * pilot conversation whose active session can't be verified (lookup error) -> 503,
+        FAIL CLOSED — we refuse rather than risk sending into a stale/replaced session;
+      * stale tab -> 409: the browser was rendered against `expected_session_id` but a
+        different session (or none) is active now (e.g. the tester ran /newtest/reset).
+    A legacy conversation with no session model never trips the 503/409 session checks
+    (its `expected_session_id` is always "" and its lookup yields "")."""
+    if conv.archived:
+        raise HTTPException(status_code=409, detail="conversation is archived")
+    current = await _active_session_id(user_id)
+    if current is None:
+        # Lookup failed. Fail CLOSED only for a genuinely session-aware pilot conversation;
+        # a legacy conversation objectively has no session to verify, so it stays available.
+        if _is_pilot_conversation(user_id, conv):
+            raise HTTPException(status_code=503, detail="session check unavailable")
+        return
+    # A non-empty expected_session_id is only ever emitted by a pilot render that had an
+    # active session, so any mismatch (including current=="" — the session was replaced)
+    # is a stale tab. Empty expected (legacy / dev-demo) skips the check.
+    if expected_session_id and expected_session_id != current:
+        raise HTTPException(status_code=409, detail="session changed")
+
+
 async def _render_conversation(user_id: str, request: Request, manager: dict):
     panel = get_conversation_store()
     conv = await panel.get(user_id)
@@ -913,6 +981,10 @@ async def _render_conversation(user_id: str, request: Request, manager: dict):
         "quick_replies": quick_replies_for(conv.funnel),
         "qualification_rows": _qualification_rows(conv.qualification),
         "stage_label": dict(BOARD_COLUMNS).get(STAGE_TO_COLUMN.get(conv.stage, ""), conv.stage),
+        # §8: which pilot session this render is bound to — the composer echoes it back on
+        # send so the server can reject a stale tab (see _assert_manual_reply_allowed).
+        # None (lookup outage) coerces to "" so rendering never breaks.
+        "session_id": await _active_session_id(user_id) or "",
     })
 
 
@@ -996,13 +1068,23 @@ async def release(user_id: str, request: Request, manager: dict = Depends(requir
 
 @router.post("/conversation/{user_id}/send", response_class=HTMLResponse)
 async def send_message(user_id: str, request: Request, manager: dict = Depends(require_admin),
-                       text: str = Form("")):
-    """Менеджер отвечает клиенту прямо из панели. Ручная отправка авто-перехватывает диалог."""
+                       text: str = Form(""), expected_session_id: str = Form("")):
+    """Менеджер отвечает клиенту прямо из панели. Ручная отправка авто-перехватывает диалог.
+
+    Increment 8B §8 (server-side manual-reply safety, identical for /admin и /admin-v2 —
+    оба шлют СЮДА): before anything is written or sent we assert the conversation exists,
+    is NOT archived, and is still the CURRENT active pilot session (`expected_session_id`
+    is the hidden field both composers echo back — a stale tab after /newtest is rejected
+    with 409). ONLY after every check passes do we intercept, log the pending message and
+    call the channel. The external send stays OUTSIDE any open DB transaction — each
+    panel-store call opens/commits its own — so a channel stall can never hold a row lock,
+    and a rejected reply leaves NO intercept / assigned_to / pending message behind."""
     text = text.strip()
     panel = get_conversation_store()
     conv = await panel.get(user_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="conversation not found")
+    await _assert_manual_reply_allowed(user_id, conv, expected_session_id)
     if text:
         await _set_intercept(user_id, True)  # отвечает человек → бот молчит
         await panel.update_meta(user_id, assigned_to=manager["login"])
@@ -1021,14 +1103,40 @@ async def send_message(user_id: str, request: Request, manager: dict = Depends(r
 
 @router.post("/conversation/{user_id}/resend/{message_id}", response_class=HTMLResponse)
 async def resend(user_id: str, message_id: int, request: Request,
-                 manager: dict = Depends(require_admin)):
-    """Повторить отправку сообщения, помеченного failed."""
+                 manager: dict = Depends(require_admin),
+                 expected_session_id: str = Form("")):
+    """Повторить отправку сообщения, помеченного failed.
+
+    Increment 8B §8: повтор — это тоже внешняя отправка, поэтому он проходит ТОТ ЖЕ
+    серверный контракт, что и ручной ответ (`_assert_manual_reply_allowed`), ПЛЮС серверную
+    проверку самого сообщения (не полагаемся на то, что кнопка «Повторить» видна только у
+    failed). Строгий порядок, всё ДО вызова канала:
+      1. найти Conversation (иначе 404);
+      2. найти сообщение В ЭТОЙ Conversation — `conv.messages` содержит только её
+         сообщения, поэтому чужой/несуществующий id → 404 (принадлежность + существование);
+      3. общий archived/session guard (`_assert_manual_reply_allowed`);
+      4. сообщение исходящее (bot/manager, не входящее client) — иначе 409;
+      5. текущий пилот допускает повтор ТОЛЬКО при status == "failed" (sent/delivered/read/
+         pending/прочее → 409, ничего не отправляем и не меняем).
+    Только после всех проверок — transport.send. При любом отказе: канал не вызывается,
+    статус не меняется, новые сообщения не создаются, takeover/lead_status не трогаются."""
     panel = get_conversation_store()
     conv = await panel.get(user_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     target = next((m for m in conv.messages if m.id == message_id), None)
-    if target is not None and target.text:
+    if target is None:
+        # Сообщения нет в ЭТОЙ переписке — либо не существует, либо принадлежит другой
+        # Conversation. В обоих случаях отклоняем без внешней отправки.
+        raise HTTPException(status_code=404, detail="message not found in this conversation")
+    await _assert_manual_reply_allowed(user_id, conv, expected_session_id)
+    if target.sender not in ("bot", "manager"):
+        raise HTTPException(status_code=409, detail="message is not outgoing")
+    if target.status != "failed":
+        # Повтор допустим только для недоставленного сообщения — уже sent/delivered/read/
+        # pending повторно НЕ отправляем (иначе дубль клиенту).
+        raise HTTPException(status_code=409, detail="message is not in a resendable state")
+    if target.text:
         try:
             provider = await outbound.send_to_client(
                 conv.channel, conv.bot_id, conv.chat_id or user_id, target.text)

@@ -45,6 +45,7 @@
     {% endfor %}
   </div>
 
+  {% if not c.archived %}
   {# Show the first 4 quick replies; the rest hide behind «Ещё ▾» (owner §7). #}
   <div class="quick-replies">
     {% for label, text in quick_replies.items() %}
@@ -59,6 +60,9 @@
   <div class="composer-wrap">
     <form class="composer" id="v2-composer-{{ c.user_id }}"
           onsubmit="event.preventDefault(); v2SendMessage('{{ c.user_id }}', this); return false;">
+      {# §8: pilot session this chat was rendered against — v2SendMessage's FormData sends
+         it back so the shared /admin/.../send route rejects a stale tab (409) after /newtest. #}
+      <input type="hidden" name="expected_session_id" value="{{ session_id }}">
       <textarea name="text" rows="1" placeholder="Ответить клиенту…" autocomplete="off" aria-label="Ответить клиенту"></textarea>
       <button class="btn-send" type="submit" aria-label="Отправить">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
@@ -66,6 +70,16 @@
     </form>
     <div class="composer-hint">Отправка ответа тоже переводит диалог на вас.</div>
   </div>
+  {% else %}
+  {# Archived: the backend /admin/.../send route has NO archived guard, so this is a
+     UI-only block (owner §5 R2) — restore the conversation to reply. #}
+  <div class="composer-wrap">
+    <div class="error-state" style="margin:10px 16px;background:var(--surface-2);color:var(--muted)">
+      Диалог в архиве — восстановите его, чтобы продолжить переписку.
+      <button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;width:auto;margin-left:auto" onclick="v2Unarchive('{{ c.user_id }}')">Вернуть из архива</button>
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <aside class="lead-pane" id="v2-lead-{{ c.user_id }}">
@@ -150,6 +164,10 @@
   </div>
 
   <div class="lead-sec">
+    {% if c.archived %}
+    <button type="button" class="btn btn-ghost btn-block" onclick="v2Unarchive('{{ c.user_id }}')">Вернуть из архива</button>
+    {% else %}
     <button type="button" class="btn btn-ghost btn-block" onclick="v2ArchiveConv('{{ c.user_id }}')">Архивировать диалог</button>
+    {% endif %}
   </div>
 </aside>

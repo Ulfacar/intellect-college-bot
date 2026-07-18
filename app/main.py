@@ -49,6 +49,17 @@ def _log_config_safety() -> None:
         settings.telegram_allowed_user_ids or settings.telegram_allowed_chat_ids
     ):
         log.warning("Telegram allowlist пуст — пилот закрыт для ВСЕХ (задайте TELEGRAM_ALLOWED_USER_IDS)")
+    # Increment 8B (owner §11): DEMO_LOGIN must never be reachable in production, even if
+    # left set by accident. settings.demo_login_available() already force-disables the
+    # actual routes (/admin/login/demo, /admin-v2/login/demo) — this is only an AUDIT
+    # warning at boot so the misconfiguration is loud in logs. Does not fail startup
+    # (safer to keep the bot answering than to crash on a login-page detail).
+    if settings.demo_login and settings.environment == "production":
+        log.warning(
+            "DEMO_LOGIN=true в production (ENVIRONMENT=production) — демо-вход "
+            "ПРИНУДИТЕЛЬНО ОТКЛЮЧЁН (settings.demo_login_available() == False). "
+            "Уберите DEMO_LOGIN или проверьте переменную ENVIRONMENT."
+        )
 
 
 @asynccontextmanager

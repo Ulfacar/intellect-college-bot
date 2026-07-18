@@ -131,6 +131,13 @@ class Settings(BaseSettings):
     session_secret: str = "change-me-college-session-secret"
     demo_login: bool = False
 
+    # Increment 8B (owner §11): deployment environment, used ONLY to force-disable
+    # demo-login in production even if DEMO_LOGIN=true is accidentally left set (see
+    # `demo_login_available()` below + app/main.py's startup warning). Default "dev" —
+    # every existing test/deployment that never sets ENVIRONMENT keeps today's exact
+    # behavior (demo_login_available() == demo_login unchanged).
+    environment: str = "dev"
+
     # Increment 8A: dev-only visual-redesign prototype of the admin UI, mounted at
     # /admin-v2 ONLY when this is true (default False — off in prod & tests). It is a
     # separate, view-only router (app/admin/router_v2.py) that reuses the existing
@@ -141,6 +148,13 @@ class Settings(BaseSettings):
         if self.managers:
             return self.managers
         return [ManagerConfig(login=self.admin_user, name="Менеджер", password=self.admin_password)]
+
+    def demo_login_available(self) -> bool:
+        """Increment 8B (owner §11) single source of truth for BOTH `/admin/login/demo`
+        and `/admin-v2/login/demo`: demo login is only ever available when explicitly
+        enabled AND we are not in production — this way a stray `DEMO_LOGIN=true` left
+        in a prod env can never actually expose the password-less quick-login buttons."""
+        return self.demo_login and self.environment != "production"
 
 
 settings = Settings()

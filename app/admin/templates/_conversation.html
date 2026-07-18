@@ -100,6 +100,7 @@
           {% elif m.status == 'failed' %}<span title="не доставлено" style="color:var(--hot)">✗ не доставлено</span>
             <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px"
                     hx-post="/admin/conversation/{{ c.user_id }}/resend/{{ m.id }}"
+                    hx-vals='{"expected_session_id": "{{ session_id }}"}'
                     hx-target="#chat" hx-swap="innerHTML">Повторить</button>
           {% endif %}
         {% endif %}
@@ -128,6 +129,10 @@
   <form class="composer" id="composer-{{ c.user_id }}" hx-preserve="true"
         hx-post="/admin/conversation/{{ c.user_id }}/send"
         hx-target="#chat" hx-swap="innerHTML" hx-on::after-request="this.reset()">
+    {# §8: pilot session this chat was rendered against — the server rejects a stale send
+       (409) if a newer session became active (e.g. the tester ran /newtest). hx-preserve
+       keeps THIS old value across the 4s poll, which is exactly what detects the stale tab. #}
+    <input type="hidden" name="expected_session_id" value="{{ session_id }}">
     <textarea name="text" rows="2" placeholder="Ответить клиенту…" autocomplete="off" aria-label="Ответить клиенту"></textarea>
     <button class="btn btn-brand" type="submit" aria-label="Отправить">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>

@@ -1,5 +1,8 @@
 {% from "_owner_macros.html" import owner_dot, owner_chip %}
-{# Vertical dialog-row list: inbox (ждут ответа) | search | archive (owner §4 P0 fix). #}
+{# Vertical dialog-row list: inbox (ждут ответа/активные + owner filters) | search |
+   archive (owner §4/§5). `scope`/`owner` only apply in mode == 'inbox' — they select
+   which/how the manager narrows the inbox (owner §5): активные/ждут ответа + bot/
+   manager/paused/все. #}
 <div id="dialog-list-root" data-mode="{{ mode }}">
   <div class="list-toolbar">
     {% if mode == 'search' %}
@@ -8,7 +11,7 @@
     {% elif mode == 'archive' %}
       <span class="meta">В архиве — {{ cards|length }}</span>
     {% else %}
-      <span class="meta">Ждут ответа — {{ cards|length }}</span>
+      <span class="meta">{{ 'Активные' if scope == 'all' else 'Ждут ответа' }} — {{ cards|length }}</span>
     {% endif %}
     <span style="flex:1"></span>
     {% if mode != 'archive' %}
@@ -19,6 +22,17 @@
     </button>
     {% endif %}
   </div>
+  {% if mode == 'inbox' %}
+  <div class="list-toolbar" style="border-top:none">
+    <button type="button" class="list-tab{{ ' active' if scope != 'all' else '' }}" onclick="v2SetInboxFilter('waiting', V2_OWNER)">Ждут ответа</button>
+    <button type="button" class="list-tab{{ ' active' if scope == 'all' else '' }}" onclick="v2SetInboxFilter('all', V2_OWNER)">Активные</button>
+    <span style="width:1px;background:var(--border);align-self:stretch;margin:0 4px"></span>
+    <button type="button" class="list-tab{{ ' active' if not owner else '' }}" onclick="v2SetInboxFilter(V2_SCOPE, '')">Все</button>
+    <button type="button" class="list-tab{{ ' active' if owner == 'bot' else '' }}" onclick="v2SetInboxFilter(V2_SCOPE, 'bot')">Бот</button>
+    <button type="button" class="list-tab{{ ' active' if owner == 'manager' else '' }}" onclick="v2SetInboxFilter(V2_SCOPE, 'manager')">Менеджер</button>
+    <button type="button" class="list-tab{{ ' active' if owner == 'paused' else '' }}" onclick="v2SetInboxFilter(V2_SCOPE, 'paused')">Пауза</button>
+  </div>
+  {% endif %}
 
   {% if not cards %}
   <div class="empty-state">
@@ -33,13 +47,13 @@
   {% endif %}
 
   {% for c in cards %}
-  <div class="dlg-row" tabindex="0" data-user-id="{{ c.user_id }}"
-       hx-get="/admin-v2/conversation/{{ c.user_id }}" hx-target="#workspace" hx-swap="innerHTML"
-       onclick="openV2Row(this, event)">
+  <div class="dlg-row{{ ' dlg-row-archived' if mode == 'archive' else '' }}" tabindex="0" data-user-id="{{ c.user_id }}" onclick="v2OpenDialogRow(this)">
     {% if mode != 'archive' %}
     <label class="bulk-box" title="Выбрать" onclick="event.stopPropagation()">
       <input type="checkbox" class="v2-bulk-checkbox" value="{{ c.user_id }}" onclick="event.stopPropagation()" onchange="updateV2Selection()">
     </label>
+    {% else %}
+    <span class="chip" title="В архиве" style="flex-shrink:0">В архиве</span>
     {% endif %}
     <span class="avatar" style="background: {{ c.avatar }}">{{ c.initials }}</span>
     <div class="body">
@@ -52,9 +66,17 @@
       <div class="meta-row">
         {{ owner_dot(c) }}
         {{ owner_chip(c) }}
+        {% if c.lead_temperature and c.lead_temperature != 'new' %}
+        <span class="temp-tag temp-{{ c.lead_temperature }}" style="padding:2px 7px;font-size:11px">{{ {'warm':'тёплый','hot':'горячий'}.get(c.lead_temperature, c.lead_temperature) }}</span>
+        {% endif %}
         {% if c.needs_reply %}<span class="pill pill-urgent pill-sm">ваш ход</span>{% endif %}
         {% if c.wait_level in ('warm', 'hot') %}<span class="pill pill-urgent pill-sm">ждёт {{ c.wait_label }}</span>{% endif %}
       </div>
+      {% if c.next_step %}
+      <div class="meta-row" style="margin-top:2px">
+        <span class="meta" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">➜ {{ c.next_step }}</span>
+      </div>
+      {% endif %}
     </div>
     <div class="side">
       <span class="time">{{ c.time_label }}</span>

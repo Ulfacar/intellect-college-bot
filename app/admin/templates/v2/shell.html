@@ -4,6 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Intellect College — приёмная (v2 прототип)</title>
+  {# Increment 8B §12 (CDN robustness) — DELIBERATE CHOICE, documented here rather than
+     inlined: every CORE inbox/chat operation below (initial list load, search, filters,
+     open conversation, takeover/release/send/archive/unarchive/resend/outcome/suggest,
+     system-page toggles) is implemented with `v2Load()`/`doAction()` — plain fetch(),
+     NEVER an hx-* attribute or htmx.ajax() call — so this whole panel works with these
+     two CDN scripts fully blocked. htmx/Sortable stay CDN-loaded ONLY for two
+     NON-critical progressive enhancements that already feature-detect their absence:
+     (1) the legacy kanban board's 15s auto-refresh (`hx-trigger="every 15s"` in
+     _kanban.html — simply never fires without htmx, board still loads/works via
+     `v2Load()` on nav click); (2) kanban drag-and-drop (`initV2KanbanDnD()` below already
+     no-ops `if (typeof Sortable === 'undefined')`). We chose this over inlining minified
+     vendor bundles into <script> blocks to keep the diff auditable — R9 explicitly
+     allows either. Google Fonts get the same treatment: _style.html's `--font` stack
+     already ends in `system-ui, -apple-system, Segoe UI, Roboto, sans-serif`, so a
+     blocked fonts.googleapis.com never breaks layout, only swaps the typeface. #}
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   {% include "_style.html" %}
@@ -27,6 +42,10 @@
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/></svg>
         Архив
       </button>
+      <a class="nav-item" href="/admin-v2/system">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Система
+      </a>
       <div class="nav-spacer"></div>
       <a class="nav-item" href="/admin" target="_blank" rel="noopener">← Классический /admin</a>
       <form method="post" action="/admin-v2/logout" style="width:100%">
@@ -42,8 +61,7 @@
         <div class="search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
           <input type="search" name="q" placeholder="Поиск по имени или номеру…" autocomplete="off" aria-label="Поиск диалогов"
-                 hx-get="/admin-v2/search" hx-trigger="keyup changed delay:300ms, search"
-                 hx-target="#dialog-list" hx-swap="innerHTML" onfocus="v2SearchFocused()">
+                 oninput="v2OnSearchInput(this)" onsearch="v2OnSearchInput(this, true)" onfocus="v2SearchFocused()">
         </div>
         <div class="me">
           <span>{{ manager.name if manager else 'Менеджер' }}</span>
@@ -52,7 +70,7 @@
       </header>
 
       <div id="view-list" class="workspace-grid">
-        <section class="main-list" id="dialog-list" hx-get="/admin-v2/inbox" hx-trigger="load" hx-swap="innerHTML"></section>
+        <section class="main-list" id="dialog-list"></section>
         <div class="main-workspace" id="workspace">
           <div class="empty-state" style="grid-column:1/-1">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -69,7 +87,7 @@
           ⚠️ legacy-board (временный) — старые 7 колонок канбана для сверки; не связаны с
           11 каноническими статусами лида и будут заменены отдельной доской позже.
         </div>
-        <div id="kanban-root" hx-get="/admin-v2/board/{{ funnels[0][0] if funnels else 'admission' }}" hx-trigger="load" hx-swap="innerHTML"></div>
+        <div id="kanban-root"></div>
       </div>
     </div>
   </div>
@@ -92,28 +110,82 @@
 
   <script>
     var V2_DEFAULT_FUNNEL = "{{ funnels[0][0] if funnels else 'admission' }}";
+    // Current inbox filter (owner §5) — kept as module state so polling refresh
+    // (`_v2PollStats` -> `v2RefreshList`) and the nav "Инбокс" tab reuse the manager's
+    // last choice instead of silently resetting it every 12s.
+    var V2_SCOPE = 'waiting';   // 'waiting' (ждут ответа) | 'all' (активные)
+    var V2_OWNER = '';         // '' (все) | 'bot' | 'manager' | 'paused'
 
-    /* ---------------- toast (owner §4 P0: no silent empty catch) ---------------- */
-    function v2Toast(msg) {
+    /* ---------------- toast (owner §1 R1: kind + human RU status mapping) ---------- */
+    function toast(kind, msg) {
       var stack = document.getElementById('toast-stack');
       if (!stack) return;
       var el = document.createElement('div');
-      el.className = 'toast toast--error';
+      el.className = 'toast toast--' + (kind === 'success' ? 'ok' : kind === 'warning' ? 'warn' : 'error');
       el.textContent = msg || 'Не удалось — проверьте связь и повторите.';
       stack.appendChild(el);
-      setTimeout(function () { el.remove(); }, 4200);
+      var life = kind === 'success' ? 2600 : 4200;
+      setTimeout(function () { el.remove(); }, life);
     }
-    function v2ToastOk(msg) {
-      var stack = document.getElementById('toast-stack');
-      if (!stack || !msg) return;
-      var el = document.createElement('div');
-      el.className = 'toast toast--ok';
-      el.textContent = msg;
-      stack.appendChild(el);
-      setTimeout(function () { el.remove(); }, 2600);
+    // Back-compat thin wrappers — kept so the rest of this file (and any future partial)
+    // can call the short names; both now funnel through the single `toast()` layer.
+    function v2Toast(msg) { toast('error', msg); }
+    function v2ToastOk(msg) { if (msg) toast('success', msg); }
+
+    function _v2StatusMessage(status, context) {
+      if (status === 404) return 'Состояние диалога изменилось, обновите страницу';
+      // §8: единственные причины 409 на /send — диалог в архиве или началась новая
+      // сессия у клиента (устаревшая вкладка). НЕ «другой менеджер взял» — конкуренции
+      // менеджеров на сервере нет (она мягкая, через плашку busy_by в шапке чата).
+      if (status === 409) return 'Состояние диалога изменилось (архив или новая сессия) — обновите диалог';
+      // §8 fail-closed: активную сессию Telegram-пилота не удалось проверить — не шлём.
+      if (status === 503) return 'Не удалось проверить состояние диалога — обновите и повторите';
+      if (status >= 500 || status === 0) return 'Сервер временно недоступен';
+      return context || 'Не удалось выполнить действие';
     }
-    document.body.addEventListener('htmx:responseError', function () { v2Toast(); });
-    document.body.addEventListener('htmx:sendError', function () { v2Toast(); });
+    // Shared write wrapper (owner §1 R1): POSTs to an EXISTING /admin/... route, maps
+    // any non-ok response to a human RU toast (never a stack trace), never throws.
+    async function doAction(url, opts) {
+      opts = opts || {};
+      // opts.noToast: caller shows its own single tailored toast (e.g. v2SendMessage's
+      // 409 self-heal) — avoids a double toast for one failure.
+      try {
+        var r = await fetch(url, {
+          method: opts.method || 'POST',
+          headers: Object.assign({ 'HX-Request': 'true' }, opts.headers || {}),
+          body: opts.body,
+        });
+        if (!r.ok) { if (!opts.noToast) toast('error', _v2StatusMessage(r.status, opts.errorContext)); return { ok: false, status: r.status, response: r }; }
+        return { ok: true, status: r.status, response: r };
+      } catch (err) {
+        if (!opts.noToast) toast('error', _v2StatusMessage(0, opts.errorContext));
+        return { ok: false, status: 0, response: null };
+      }
+    }
+    document.body.addEventListener('htmx:responseError', function (e) {
+      var status = (e.detail && e.detail.xhr) ? e.detail.xhr.status : 0;
+      toast('error', _v2StatusMessage(status));
+    });
+    document.body.addEventListener('htmx:sendError', function () { toast('error', _v2StatusMessage(0)); });
+
+    /* ---------------- fetch-based partial loader (owner §12 R9 — htmx-independent) - */
+    // Loads `url` HTML into `targetSelector`'s innerHTML via plain fetch(). This is the
+    // ONE loader every core navigation/mutation below uses, so the whole panel keeps
+    // working with htmx.org fully blocked (see the CDN-robustness comment in <head>).
+    async function v2Load(url, targetSelector) {
+      var target = document.querySelector(targetSelector);
+      if (!target) return false;
+      try {
+        var r = await fetch(url, { headers: { 'HX-Request': 'true' } });
+        if (!r.ok) { toast('error', _v2StatusMessage(r.status)); return false; }
+        target.innerHTML = await r.text();
+        _v2AfterSwap(target);
+        return true;
+      } catch (err) {
+        toast('error', _v2StatusMessage(0));
+        return false;
+      }
+    }
 
     /* ---------------- nav / view switching ---------------- */
     function showView(view) {
@@ -129,12 +201,20 @@
       document.getElementById('section-title').textContent = titles[view] || 'Инбокс';
       var s = document.querySelector('.search input'); if (s) s.value = '';
       if (view === 'kanban') {
-        if (window.htmx) htmx.ajax('GET', '/admin-v2/board/' + V2_DEFAULT_FUNNEL, { target: '#kanban-root', swap: 'innerHTML' });
+        v2Load('/admin-v2/board/' + V2_DEFAULT_FUNNEL, '#kanban-root');
       } else if (view === 'archive') {
-        if (window.htmx) htmx.ajax('GET', '/admin-v2/archive', { target: '#dialog-list', swap: 'innerHTML' });
+        v2Load('/admin-v2/archive', '#dialog-list');
       } else {
-        if (window.htmx) htmx.ajax('GET', '/admin-v2/inbox', { target: '#dialog-list', swap: 'innerHTML' });
+        v2LoadInbox();
       }
+    }
+    function v2LoadInbox() {
+      var qs = '?scope=' + encodeURIComponent(V2_SCOPE) + '&owner=' + encodeURIComponent(V2_OWNER);
+      return v2Load('/admin-v2/inbox' + qs, '#dialog-list');
+    }
+    function v2SetInboxFilter(scope, owner) {
+      V2_SCOPE = scope; V2_OWNER = owner;
+      v2LoadInbox();
     }
     function v2SearchFocused() {
       if (!document.getElementById('view-list').hidden) return;
@@ -144,23 +224,38 @@
       var s = document.querySelector('.search input'); if (s) s.value = '';
       showView('list');
     }
+    var _v2SearchTimer = null;
+    function v2OnSearchInput(el, immediate) {
+      clearTimeout(_v2SearchTimer);
+      var q = el.value;
+      // Пустой запрос (например, стёрли backspace'ом) — не оставляем список в режиме
+      // «Поиск: „“», а честно возвращаемся в инбокс с текущими фильтрами (Fable P2).
+      var run = function () {
+        if (!q.trim()) { v2LoadInbox(); return; }
+        v2Load('/admin-v2/search?q=' + encodeURIComponent(q), '#dialog-list');
+      };
+      if (immediate) { run(); return; }
+      _v2SearchTimer = setTimeout(run, 300);
+    }
     function v2RefreshList() {
       var root = document.getElementById('dialog-list-root');
       var mode = root ? root.getAttribute('data-mode') : 'inbox';
-      var url = '/admin-v2/inbox';
-      if (mode === 'archive') url = '/admin-v2/archive';
+      if (mode === 'archive') { v2Load('/admin-v2/archive', '#dialog-list'); }
       else if (mode === 'search') {
         var s = document.querySelector('.search input');
-        url = '/admin-v2/search?q=' + encodeURIComponent((s && s.value.trim()) || '');
+        v2Load('/admin-v2/search?q=' + encodeURIComponent((s && s.value.trim()) || ''), '#dialog-list');
+      } else {
+        v2LoadInbox();
       }
-      if (window.htmx) htmx.ajax('GET', url, { target: '#dialog-list', swap: 'innerHTML' });
       _v2PollStats();
     }
 
     /* ---------------- dialog row selection + mobile fullscreen (owner §4 P0) ------- */
-    function openV2Row(el) {
+    async function v2OpenDialogRow(el) {
       document.querySelectorAll('.dlg-row.active').forEach(function (r) { r.classList.remove('active'); });
       el.classList.add('active');
+      var uid = el.getAttribute('data-user-id');
+      await v2Load('/admin-v2/conversation/' + encodeURIComponent(uid), '#workspace');
       if (window.matchMedia('(max-width: 860px)').matches) {
         document.body.classList.add('mobile-chat-open');
       }
@@ -184,17 +279,17 @@
       var d = document.getElementById('kanban-drawer');
       if (d) { d.classList.remove('open'); d.classList.remove('lead-shown'); }
     }
-    function openV2Kanban(userId) {
+    async function openV2Kanban(userId) {
       var url = '/admin-v2/conversation/' + encodeURIComponent(userId);
       if (_v2IsMobile()) {
         // Mobile: reuse the SAME inbox fullscreen chat (no drawer on phones).
         showView('list');
-        if (window.htmx) htmx.ajax('GET', url, { target: '#workspace', swap: 'innerHTML' });
+        await v2Load(url, '#workspace');
         document.body.classList.add('mobile-chat-open');
         return;
       }
       // Desktop: slide-in drawer over the board, manager stays on the kanban.
-      if (window.htmx) htmx.ajax('GET', url, { target: '#kanban-drawer-body', swap: 'innerHTML' });
+      await v2Load(url, '#kanban-drawer-body');
       var d = document.getElementById('kanban-drawer');
       if (d) { d.classList.add('open'); d.classList.remove('lead-shown'); }
     }
@@ -223,35 +318,24 @@
       if (!confirm('Заархивировать ' + ids.length + ' диалог(ов)?')) return;
       var body = new URLSearchParams();
       ids.forEach(function (id) { body.append('user_ids', id); });
-      try {
-        var r = await fetch('/admin/conversations/archive', {
-          method: 'POST',
-          headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-          body: body.toString(),
-        });
-        if (!r.ok) { v2Toast(); return; }
-        v2RefreshList();
-      } catch (_) { v2Toast(); }
+      var res = await doAction('/admin/conversations/archive', {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body.toString(), errorContext: 'Не удалось архивировать выбранные диалоги',
+      });
+      if (res.ok) { v2RefreshList(); v2ToastOk('Заархивировано: ' + ids.length); }
     }
 
     /* ---------------- write actions: reuse EXISTING /admin/... endpoints ----------- */
-    async function v2Post(url) {
-      try {
-        var r = await fetch(url, { method: 'POST', headers: { 'HX-Request': 'true' } });
-        if (!r.ok) { v2Toast(); return false; }
-        return true;
-      } catch (_) { v2Toast(); return false; }
+    async function v2Post(url, errorContext) {
+      var res = await doAction(url, { errorContext: errorContext });
+      return res.ok;
     }
-    async function v2PostBody(url, body) {
-      try {
-        var r = await fetch(url, {
-          method: 'POST',
-          headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-          body: body,
-        });
-        if (!r.ok) { v2Toast(); return false; }
-        return true;
-      } catch (_) { v2Toast(); return false; }
+    async function v2PostBody(url, body, errorContext) {
+      var res = await doAction(url, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body, errorContext: errorContext,
+      });
+      return res.ok;
     }
     // The open conversation lives EITHER in the inbox 3-pane (#workspace) OR in the
     // kanban drawer (#kanban-drawer-body) — never both. These helpers target whichever
@@ -265,41 +349,93 @@
       var c = _v2ConvContainer();
       return c ? c.querySelector('form.composer textarea[name="text"]') : null;
     }
+    // §8: session id the open conversation was rendered against (hidden field in the
+    // composer). "" when the composer is absent (archived) — the server then rejects on
+    // the archived check anyway.
+    function _v2ExpectedSessionId() {
+      var c = _v2ConvContainer();
+      var el = c ? c.querySelector('input[name="expected_session_id"]') : null;
+      return el ? el.value : '';
+    }
     function v2RefreshConversation(userId) {
       var c = _v2ConvContainer();
       var target = (c && c.id === 'kanban-drawer-body') ? '#kanban-drawer-body' : '#workspace';
-      if (window.htmx) htmx.ajax('GET', '/admin-v2/conversation/' + encodeURIComponent(userId), { target: target, swap: 'innerHTML' });
+      return v2Load('/admin-v2/conversation/' + encodeURIComponent(userId), target);
     }
     async function v2Takeover(userId) {
-      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/takeover')) v2RefreshConversation(userId);
+      if (!confirm('Взять диалог себе? Бот перестанет отвечать этому клиенту.')) return;
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/takeover', 'Не удалось взять диалог')) v2RefreshConversation(userId);
     }
     async function v2Release(userId) {
-      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/release')) v2RefreshConversation(userId);
+      if (!confirm('Вернуть диалог боту?')) return;
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/release', 'Не удалось вернуть диалог')) v2RefreshConversation(userId);
     }
     async function v2SendMessage(userId, form) {
+      // Double-submit guard (owner §5 R2): a second click/Enter while the first request
+      // is still in flight is a no-op, not a duplicate send.
+      var btn = form.querySelector('.btn-send');
+      var inp = form.querySelector('textarea[name="text"]');
+      if (btn && btn.disabled) return;
+      // Пустой ответ сервер игнорирует (`if text:`) — не шлём и не рисуем ложный success.
+      if (!inp || !inp.value.trim()) return;
+      var draft = inp.value;   // сохраняем черновик на случай ошибки/refresh (§8)
       var fd = new FormData(form);
       var body = new URLSearchParams();
       fd.forEach(function (v, k) { body.append(k, v); });
-      var ok = await v2PostBody('/admin/conversation/' + encodeURIComponent(userId) + '/send', body.toString());
-      if (ok) { form.reset(); v2RefreshConversation(userId); v2RefreshList(); v2ToastOk('Ответ отправлен'); }
+      if (btn) btn.disabled = true;
+      if (inp) inp.disabled = true;
+      // noToast: показываем РОВНО ОДИН тост сами, чтобы в случае «409 + архив» не было
+      // двойного тоста (ошибка doAction + предупреждение) — Opus/Fable MINOR.
+      var res = await doAction('/admin/conversation/' + encodeURIComponent(userId) + '/send', {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body.toString(), errorContext: 'Не удалось отправить сообщение', noToast: true,
+      });
+      if (btn) btn.disabled = false;
+      if (inp) inp.disabled = false;
+      if (res.ok) {
+        form.reset();
+        v2RefreshConversation(userId); v2RefreshList(); v2ToastOk('Ответ отправлен');
+        return;
+      }
+      // §8: сервер отклонил ответ. 409 = диалог в архиве ИЛИ началась новая сессия у
+      // клиента (устаревшая вкладка); 503 = не удалось проверить активную сессию (fail
+      // closed). Перезагружаем сам диалог, чтобы скрытый expected_session_id и archived-
+      // состояние стали честными — иначе повторная отправка снова словит ошибку. Черновик
+      // НЕ теряем: если после refresh composer остался — возвращаем текст туда; если исчез
+      // (диалог оказался архивным) — отдаём текст в единственном toast.
+      if (res.status === 409 || res.status === 503) {
+        await v2RefreshConversation(userId);
+        var fresh = _v2ComposerInput();
+        if (fresh) { fresh.value = draft; fresh.focus(); toast('warning', _v2StatusMessage(res.status)); }
+        else { toast('warning', 'Диалог в архиве — восстановите его, чтобы ответить. Ваш текст: ' + draft); }
+        return;
+      }
+      // Прочие ошибки (сеть/сервер): текст уже остался в поле, показываем один тост и фокус.
+      toast('error', _v2StatusMessage(res.status, 'Не удалось отправить сообщение'));
+      if (inp) inp.focus();
     }
     async function v2Outcome(userId, outcome) {
-      var ok = await v2PostBody('/admin/conversation/' + encodeURIComponent(userId) + '/outcome', 'outcome=' + encodeURIComponent(outcome));
+      var ok = await v2PostBody('/admin/conversation/' + encodeURIComponent(userId) + '/outcome', 'outcome=' + encodeURIComponent(outcome), 'Не удалось сохранить исход');
       if (ok) v2RefreshConversation(userId);
     }
     async function v2Resend(userId, msgId) {
-      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/resend/' + msgId)) v2RefreshConversation(userId);
+      // §8: resend проходит тот же серверный guard, что и send — передаём session этой
+      // вкладки, чтобы устаревший/архивный повтор был отклонён (409/503), а не ушёл в обход.
+      var body = new URLSearchParams();
+      var sid = _v2ExpectedSessionId();
+      if (sid) body.append('expected_session_id', sid);
+      if (await v2PostBody('/admin/conversation/' + encodeURIComponent(userId) + '/resend/' + msgId, body.toString(), 'Не удалось повторить отправку')) v2RefreshConversation(userId);
     }
     async function v2ArchiveConv(userId, ev) {
       if (ev) { ev.preventDefault(); ev.stopPropagation(); }
       if (!confirm('Заархивировать этот диалог?')) return;
-      var ok = await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/archive');
+      var ok = await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/archive', 'Не удалось архивировать');
       if (ok) {
         var drawer = document.getElementById('kanban-drawer');
         if (drawer && drawer.classList.contains('open')) {
           // Archived from the kanban drawer: close it and refresh the board.
           v2CloseDrawer();
-          if (window.htmx) htmx.ajax('GET', '/admin-v2/board/' + V2_DEFAULT_FUNNEL, { target: '#kanban-root', swap: 'innerHTML' });
+          v2Load('/admin-v2/board/' + V2_DEFAULT_FUNNEL, '#kanban-root');
         } else {
           v2RefreshList();
           var ws = document.getElementById('workspace');
@@ -313,7 +449,17 @@
     }
     async function v2Unarchive(userId, ev) {
       if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/unarchive')) v2RefreshList();
+      if (await v2Post('/admin/conversation/' + encodeURIComponent(userId) + '/unarchive', 'Не удалось вернуть диалог из архива')) {
+        v2RefreshList();
+        // Если ИМЕННО этот диалог открыт (workspace или drawer) — перечитываем его, чтобы
+        // «Диалог в архиве» сменился рабочим composer'ом, а не остался ложным (Fable P2).
+        // `#v2-lead-<userId>` рендерится в _workspace.html и для архивного, и для активного.
+        var c = _v2ConvContainer();
+        if (c && c.querySelector && c.querySelector('#v2-lead-' + CSS.escape(userId))) {
+          v2RefreshConversation(userId);
+        }
+        v2ToastOk('Диалог восстановлен из архива');
+      }
     }
     function v2ToggleQuickReplies(btn) {
       var wrap = btn.closest('.quick-replies');
@@ -331,15 +477,17 @@
     async function v2SuggestReply(userId, btn) {
       var inp = _v2ComposerInput();
       if (!inp) return;
+      // Не затираем уже набранный черновик без подтверждения (Fable P2).
+      if (inp.value.trim() && !confirm('Заменить набранный текст черновиком ИИ?')) return;
       var old = btn.textContent; btn.textContent = '…думаю'; btn.disabled = true;
-      try {
-        var r = await fetch('/admin/conversation/' + encodeURIComponent(userId) + '/suggest', { method: 'POST' });
-        if (!r.ok) { v2Toast(); } else {
-          inp.value = (await r.text()).trim();
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-          inp.focus();
-        }
-      } catch (_) { v2Toast(); }
+      var res = await doAction('/admin/conversation/' + encodeURIComponent(userId) + '/suggest', {
+        errorContext: 'Не удалось получить черновик ответа',
+      });
+      if (res.ok) {
+        inp.value = (await res.response.text()).trim();
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.focus();
+      }
       btn.textContent = old; btn.disabled = false;
     }
 
@@ -379,7 +527,7 @@
     /* ---------------- legacy kanban: drag-and-drop with revert + toast on fail ----- */
     var _v2Dragging = false;
     function initV2KanbanDnD() {
-      if (typeof Sortable === 'undefined') return;
+      if (typeof Sortable === 'undefined') return;   // no CDN → D&D silently unavailable
       document.querySelectorAll('#view-kanban .kb-col-cards').forEach(function (col) {
         if (col._sortable) return;
         col._sortable = Sortable.create(col, {
@@ -397,32 +545,28 @@
       var stage = toCol && toCol.getAttribute('data-col');
       var boardRoot = evt.to.closest('[data-funnel]');
       var funnel = boardRoot && boardRoot.getAttribute('data-funnel');
-      var failed = false;
       if (uid && stage && evt.to !== evt.from) {
-        try {
-          var r = await fetch('/admin/conversation/' + encodeURIComponent(uid) + '/stage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
-            body: 'stage=' + encodeURIComponent(stage),
-          });
-          if (!r.ok) failed = true;
-        } catch (_) { failed = true; }
+        await doAction('/admin/conversation/' + encodeURIComponent(uid) + '/stage', {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'stage=' + encodeURIComponent(stage),
+          errorContext: 'Не удалось перенести карточку',
+        });
       }
-      if (failed) v2Toast('Не удалось перенести карточку — проверьте связь и повторите.');
       // Reload from server either way: on failure the stage never changed server-side,
       // so this naturally puts the card back where it was (no silent/local-only revert).
-      if (funnel && window.htmx) htmx.ajax('GET', '/admin-v2/board/' + funnel, { target: '#kb-board-' + funnel, swap: 'outerHTML' });
+      if (funnel) v2Load('/admin-v2/board/' + funnel, '#kb-board-' + funnel);
     }
-    document.body.addEventListener('htmx:afterSettle', function (e) {
+    // Shared "just swapped a partial in" hook — called both by our v2Load() (fetch-based
+    // core loads) and by htmx:afterSettle (the kanban board's non-critical 15s htmx poll,
+    // when htmx IS available) so drag-and-drop re-inits and chat auto-scrolls either way.
+    function _v2AfterSwap(target) {
       if (!_v2Dragging && !window.__v2Dragging) initV2KanbanDnD();
-      // Chat should open on the NEWEST message, not the oldest. Only when a conversation
-      // container (inbox workspace or the kanban drawer) was just swapped — not on the
-      // periodic inbox-list refresh — so a manager scrolled up isn't yanked back down.
-      if (e.target && (e.target.id === 'workspace' || e.target.id === 'kanban-drawer-body')) {
-        var _m = e.target.querySelector('.msgs-scroll');
+      if (target && (target.id === 'workspace' || target.id === 'kanban-drawer-body')) {
+        var _m = target.querySelector('.msgs-scroll');
         if (_m) _m.scrollTop = _m.scrollHeight;
       }
-    });
+    }
+    document.body.addEventListener('htmx:afterSettle', function (e) { _v2AfterSwap(e.target); });
     initV2KanbanDnD();
 
     /* ---------------- nav badge (waiting count) polling + inbox auto-refresh ---------- */
@@ -456,6 +600,10 @@
       } catch (_) { /* сеть моргнула — молча ждём следующего тика */ }
     }
     setInterval(_v2PollStats, 12000); _v2PollStats();
+
+    /* ---------------- initial load (owner §12 R9 — plain fetch, no hx-trigger="load") */
+    v2LoadInbox();
+    v2Load('/admin-v2/board/' + V2_DEFAULT_FUNNEL, '#kanban-root');
   </script>
 </body>
 </html>
