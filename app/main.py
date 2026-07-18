@@ -65,6 +65,17 @@ def _log_config_safety() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _log_config_safety()
+    # STAGING 1 (owner §5): fail-fast на публичном стенде до приёма трафика — небезопасная
+    # конфигурация роняет старт (в лог только имена переменных, без значений секретов).
+    from app.core.startup_validation import validate_staging_config
+    _staging_problems = validate_staging_config(settings)
+    if _staging_problems:
+        for _p in _staging_problems:
+            log.error("STAGING config error: %s", _p)
+        raise RuntimeError(
+            f"ENVIRONMENT=staging: конфигурация небезопасна, старт отменён "
+            f"({len(_staging_problems)} проблем(ы), см. лог выше)"
+        )
     # Создаём схему БД (идемпотентно), если используется Postgres под CRM или панель.
     if settings.crm_backend == "postgres" or settings.panel_backend == "postgres":
         from app.integrations.crm.db import init_db
@@ -212,6 +223,21 @@ async def health() -> dict:
         "status": "ok",
         "last_inbound_seconds_ago": observ.last_inbound_ago(),
     }
+
+
+@app.get("/health/ready")
+async def health_ready():
+    """STAGING 1 (owner §3): readiness для Docker/Caddy healthcheck и deploy-скрипта.
+    200 — приложение И БД готовы (соединение + критичная схема); 503 — иначе. НИКОГДА не
+    раскрывает DATABASE_URL, credentials, stack trace или внутреннюю структуру — только
+    статус. Для memory-бэкендов (dev/тесты) readiness == liveness (БД не используется)."""
+    uses_db = settings.crm_backend == "postgres" or settings.panel_backend == "postgres"
+    if not uses_db:
+        return {"status": "ready", "backend": "memory"}
+    from app.integrations.crm.db import check_db_ready
+    if await check_db_ready():
+        return {"status": "ready"}
+    return JSONResponse({"status": "not_ready"}, status_code=503)
 
 
 @app.post("/webhook/telegram")

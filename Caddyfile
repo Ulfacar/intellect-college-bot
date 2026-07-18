@@ -1,0 +1,52 @@
+# STAGING 1 reverse proxy (owner §3/§6/§7). Caddy 2.11.4 (директива request_body требует >= 2.10.0).
+# Внешний контур: только Caddy (80/443). HTTP→HTTPS и TLS (Let's Encrypt) — автоматически.
+# Проверка перед запуском:  caddy validate --config /etc/caddy/Caddyfile
+#
+# Значения доменa/почты/basic-auth приходят из окружения Caddy-контейнера (env в
+# docker-compose.staging.yml), секретов в этом файле НЕТ.
+
+{
+	# ACME-почта для уведомлений Let's Encrypt (не секрет).
+	email {$ACME_EMAIL}
+	# Локальный admin-endpoint Caddy наружу не нужен.
+	admin off
+	# Не раскрываем версию сервера.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$STAGING_DOMAIN} {
+	encode gzip
+
+	# Заголовки безопасности; убираем Server.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Ограничение размера запроса (owner §3).
+	request_body {
+		max_size 2MB
+	}
+
+	# Basic Auth ТОЛЬКО перед админ-страницами (owner §6). Вебхуки Telegram и health —
+	# НЕ под basic-auth (иначе Telegram и мониторинг не достучатся). `/admin*` покрывает и
+	# `/admin-v2*`. Хеш пароля (bcrypt) приходит из env ADMIN_BASIC_HASH, сгенерировать:
+	#   docker run --rm caddy:2.11.4 caddy hash-password --plaintext 'ВАШ_ПАРОЛЬ'
+	@admin path /admin*
+	basic_auth @admin {
+		{$ADMIN_BASIC_USER} {$ADMIN_BASIC_HASH}
+	}
+
+	# Проксирование во внутреннюю сеть; app наружу не публикуется. Caddy сам ставит
+	# X-Forwarded-Proto/For; приложение доверяет только этому прокси (trusted_proxies выше +
+	# uvicorn --proxy-headers с ограниченным forwarded-allow-ips, см. Dockerfile CMD).
+	reverse_proxy app:8000
+
+	# Разумные таймауты, чтобы завис канал не держал соединение вечно.
+	# (значения по умолчанию Caddy достаточны для пилота; при необходимости настраиваются здесь)
+}

@@ -698,3 +698,28 @@ async def init_db() -> None:
     get_sessionmaker()  # инициализирует _engine
     assert _engine is not None
     await init_models(_engine)
+
+
+# STAGING 1 (owner §3): критичные таблицы, наличие которых означает «схема применена».
+# Проверяются в readiness — не полный список, а минимальный набор, без которого пилот
+# заведомо неработоспособен (диалоги/сообщения + канонические лид/сессия).
+_READINESS_CRITICAL_TABLES = ("conversations", "messages", "leads", "pilot_conversations")
+
+
+async def check_db_ready(sessionmaker: async_sessionmaker | None = None) -> bool:
+    """STAGING 1 (owner §3): БД готова = соединение живо (`SELECT 1`) И критичные таблицы
+    существуют (схема применена). НИКОГДА не бросает и НИЧЕГО не раскрывает наружу: при
+    любой ошибке возвращает False, а деталь (тип исключения, без DSN/паролей) уходит
+    только в серверный лог. `sessionmaker` инъектируется в тестах; по умолчанию — боевой."""
+    sm = sessionmaker or get_sessionmaker()
+    try:
+        async with sm() as session:
+            await session.execute(text("SELECT 1"))
+            names = await session.run_sync(
+                lambda sync_session: set(inspect(sync_session.get_bind()).get_table_names())
+            )
+        return all(t in names for t in _READINESS_CRITICAL_TABLES)
+    except Exception:  # noqa: BLE001 — readiness must never raise; detail stays in logs
+        import logging
+        logging.getLogger("db").warning("readiness check failed", exc_info=True)
+        return False

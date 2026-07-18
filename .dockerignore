@@ -3,6 +3,15 @@
 .gitignore
 .env
 .env.example
+# STAGING 1: server env, дампы и инфра-файлы в образ приложения не нужны.
+.env.staging
+.env.staging.example
+*.sql.gz
+*.dump
+backups/
+Caddyfile
+docker-compose*.yml
+scripts
 .venv
 venv
 __pycache__

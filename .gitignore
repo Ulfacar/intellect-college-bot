@@ -3,6 +3,15 @@
 .env.local
 *.env
 !.env.example
+# STAGING 1: реальный server env и его варианты НЕ коммитим (`*.env` не ловит `.env.staging`).
+.env.staging
+.env.staging.local
+!.env.staging.example
+# DuckDNS token и дампы БД — только на сервере, вне git.
+duckdns.token
+*.sql.gz
+*.dump
+backups/
 
 # --- ЛИЧНЫЕ ДАННЫЕ КЛИЕНТОВ (НЕ КОММИТИТЬ) ---
 # Скрины реальных переписок с номерами родителей — только локально
