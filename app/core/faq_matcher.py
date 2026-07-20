@@ -37,10 +37,19 @@ _KY_LETTERS = ("ө", "ү", "ң")
 # never trips them. Extend as real pilot messages surface more markers.
 _KY_MARKERS = frozenset({
     "канча", "канчадан", "канчага", "кандай", "керек", "кайда", "барбы", "жогору",
-    "тапшыр", "тапшырсаныз", "окуу", "окуйм", "окуйбуз", "болобу", "аласыз", "аласыздар",
-    "чейин", "менен", "кийин", "жайгашкан", "жайгашкансыздар", "класстын", "класстан",
-    "саламатсызбы", "багыт", "багыттар", "кабыл",
+    "окуу", "окуйм", "окуйбуз", "болобу", "аласыз", "аласыздар", "менен", "кабыл",
+    "чет", "эмне", "жок", "бекен",
 })
+
+# Kyrgyz stem PREFIXES — a token starting with one of these is Kyrgyz. Prefixes catch
+# inflected forms whole-token matching misses («тапшыр» → тапшыра/тапшырам; «эсептел» →
+# эсептелеби; «бересиз» → бересизби). Each prefix is chosen so NO common Russian word
+# starts with it (verified against четыре/класс/документы/чтобы etc. — those never match).
+_KY_STEMS = (
+    "тапшыр", "эсептел", "которул", "жайгашк", "мамлекет", "улгуд", "бересиз", "кепил",
+    "элдик", "деген", "класст", "багыт", "документт", "арзандат", "жатакан", "болоб",
+    "болб", "чейин", "кийин", "саламат", "жогор", "канчад", "алаб",
+)
 
 
 @dataclass(frozen=True)
@@ -114,7 +123,10 @@ def detect_language(text: str, *, stored_language: str | None = None) -> str:
     lowered = (text or "").lower()
     if any(ch in lowered for ch in _KY_LETTERS):
         return "ky"
-    if set(re.findall(r"\w+", lowered, flags=re.UNICODE)) & _KY_MARKERS:
+    tokens = set(re.findall(r"\w+", lowered, flags=re.UNICODE))
+    if tokens & _KY_MARKERS:
+        return "ky"
+    if any(tok.startswith(stem) for tok in tokens for stem in _KY_STEMS):
         return "ky"
     if stored_language in ("ru", "ky"):
         return stored_language

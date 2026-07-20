@@ -133,3 +133,31 @@ def test_ky_marker_query_end_to_end_serves_answer_ky():
     assert result.language == "ky"
     assert result.answer == "Баасы 6500$."
     assert result.missing_answer_ky is False
+
+
+# Regression (100-dialog harness): inflected Kyrgyz forms without ө/ү/ң that whole-token
+# markers missed — «тапшыра» (not «тапшыр»), «эсептелеби», «бересизби», «мамлекеттик»,
+# «деген эмне» — must detect as "ky" via stem-prefixes.
+def test_detect_language_ky_inflected_forms():
+    for t in [
+        "Диплом мамлекеттик улгудобу?",
+        "ОРТ эсептелеби?",
+        "Тапшырам деп кепилдик бересизби?",
+        "Чет элдиктер тапшыра алабы?",
+        "зз тест альфа деген эмне",
+    ]:
+        assert detect_language(t) == "ky", t
+
+
+def test_detect_language_ru_lookalikes_not_ky():
+    # Tokens that superficially resemble Kyrgyz stems must NOT false-positive to "ky":
+    # четыре≠чет, классе≠класст, документы≠документт, «что бы» particle.
+    for t in [
+        "Сколько это будет стоить?",
+        "Четыре документа нужны для поступления?",
+        "В каком классе учится ребёнок?",
+        "Что бы вы посоветовали?",
+        "Какие документы нужны?",
+        "Где вы находитесь?",
+    ]:
+        assert detect_language(t) == "ru", t
