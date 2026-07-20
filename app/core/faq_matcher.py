@@ -31,6 +31,17 @@ FUZZY_THRESHOLD = 0.92
 # Kyrgyz-specific letters (not used in Russian) — deterministic language signal.
 _KY_LETTERS = ("ө", "ү", "ң")
 
+# Distinctive Kyrgyz function/keyword tokens that DO NOT occur as Russian words — a
+# deterministic secondary signal for Kyrgyz sentences written without ө/ү/ң letters
+# (e.g. «Окуу канча турат?»). Matched as whole tokens only, so a pure-Russian message
+# never trips them. Extend as real pilot messages surface more markers.
+_KY_MARKERS = frozenset({
+    "канча", "канчадан", "канчага", "кандай", "керек", "кайда", "барбы", "жогору",
+    "тапшыр", "тапшырсаныз", "окуу", "окуйм", "окуйбуз", "болобу", "аласыз", "аласыздар",
+    "чейин", "менен", "кийин", "жайгашкан", "жайгашкансыздар", "класстын", "класстан",
+    "саламатсызбы", "багыт", "багыттар", "кабыл",
+})
+
 
 @dataclass(frozen=True)
 class VariantText:
@@ -95,11 +106,15 @@ def detect_language(text: str, *, stored_language: str | None = None) -> str:
     """Deterministic ru/ky detection — NO LLM.
 
     1. Kyrgyz-specific letters (ө/ү/ң) anywhere in the text -> "ky".
-    2. Otherwise, if the caller supplies a known stored language ("ru"/"ky") -> use it.
-    3. Otherwise fall back to "ru".
+    2. A distinctive whole-token Kyrgyz marker (see `_KY_MARKERS`) -> "ky" — catches
+       Kyrgyz sentences that happen to use no ө/ү/ң (e.g. «Окуу канча турат?»).
+    3. Otherwise, if the caller supplies a known stored language ("ru"/"ky") -> use it.
+    4. Otherwise fall back to "ru".
     """
     lowered = (text or "").lower()
     if any(ch in lowered for ch in _KY_LETTERS):
+        return "ky"
+    if set(re.findall(r"\w+", lowered, flags=re.UNICODE)) & _KY_MARKERS:
         return "ky"
     if stored_language in ("ru", "ky"):
         return stored_language

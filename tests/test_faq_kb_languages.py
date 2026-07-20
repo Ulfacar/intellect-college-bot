@@ -93,3 +93,43 @@ def test_explicit_language_param_overrides_detection():
     forced_ru = match("сколько стоит обучение", [cand], language="ru")
     assert forced_ru.answer == "Стоимость 6500$."
     assert forced_ru.language == "ru"
+
+
+# --------------------------------------------------------------------------------------
+# Regression (pilot demo fix): Kyrgyz sentences WITHOUT ө/ү/ң letters must still detect
+# as "ky" via whole-token markers — «Окуу канча турат?» previously misdetected as RU and
+# served the Russian FAQ answer. Russian sentences must NOT false-positive to "ky".
+# --------------------------------------------------------------------------------------
+
+def test_detect_language_ky_markers_without_special_letters():
+    for t in [
+        "Окуу канча турат?",
+        "Кандай документтер керек?",
+        "Качанга чейин кабыл аласыздар?",
+        "Кайда жайгашкансыздар?",
+        "9 класстан кийин канча жыл окуйм?",
+    ]:
+        assert detect_language(t) == "ky", t
+
+
+def test_detect_language_ru_not_false_positive():
+    for t in [
+        "Сколько стоит обучение?",
+        "Какие документы нужны?",
+        "Где вы находитесь?",
+        "До какого числа приём?",
+        "Дадите гарантию что поступлю?",
+    ]:
+        assert detect_language(t) == "ru", t
+
+
+def test_ky_marker_query_end_to_end_serves_answer_ky():
+    # Full path: detect language from the Kyrgyz text (no special letters), then match
+    # resolves the KY answer — not the Russian one.
+    cand = _cand(answer_ru="Стоимость 6500$.", answer_ky="Баасы 6500$.")
+    text = "Окуу канча турат?"
+    result = match(text, [cand], language=detect_language(text))
+    assert result.matched is True
+    assert result.language == "ky"
+    assert result.answer == "Баасы 6500$."
+    assert result.missing_answer_ky is False
