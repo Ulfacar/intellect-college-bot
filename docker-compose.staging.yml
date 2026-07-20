@@ -65,11 +65,13 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      STAGING_DOMAIN: ${STAGING_DOMAIN:-intellect-pilot.duckdns.org}
-      ACME_EMAIL: ${ACME_EMAIL:-}
-      ADMIN_BASIC_USER: ${ADMIN_BASIC_USER:-support}
-      ADMIN_BASIC_HASH: ${ADMIN_BASIC_HASH:-}
+    # Caddy reads STAGING_DOMAIN / ACME_EMAIL / ADMIN_BASIC_USER / ADMIN_BASIC_HASH straight
+    # from the server env file (the Caddyfile uses Caddy's own {$VAR} placeholders). This
+    # avoids compose `${...}` interpolation of the bcrypt hash — the hash's `$` segments are
+    # written `$$`-escaped in the env file, which compose unescapes to a literal `$` when
+    # loading into the container, so no "variable ... is not set" warning is emitted.
+    env_file:
+      - ${STAGING_ENV_FILE:-/etc/intellect/staging.env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data       # сертификаты Let's Encrypt (persistent, owner §7)
