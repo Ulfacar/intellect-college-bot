@@ -238,6 +238,21 @@ def test_bot_command_leaves_non_handoff_phase_untouched():
 # 13. /help lists all commands.
 # --------------------------------------------------------------------------------------
 
+def test_start_greets_and_is_not_unknown_command():
+    async def scenario():
+        reply = await telegram_commands.handle_command(
+            bot_id="startbot", external_user_id="su1", external_chat_id="su1",
+            command="/start", args="",
+        )
+        assert reply != telegram_commands.UNKNOWN_COMMAND_TEXT
+        assert "Intellect College" in reply
+        # /start создаёт активную сессию первого касания (как /status)
+        conv, _lead = await telegram_sessions.get_active_session("startbot", "su1")
+        assert conv is not None
+
+    _run(scenario())
+
+
 def test_help_lists_all_commands():
     async def scenario():
         reply = await telegram_commands.handle_command(

@@ -62,10 +62,21 @@ FAQ_HANDOFF_SAFE_PHRASE = (
     "Этот вопрос лучше уточнит менеджер приёмной комиссии — передала ему ваш диалог."
 )
 
-COMMANDS: set[str] = {"/newtest", "/reset", "/status", "/manager", "/bot", "/feedback", "/cancel", "/help"}
+COMMANDS: set[str] = {"/start", "/newtest", "/reset", "/status", "/manager", "/bot", "/feedback", "/cancel", "/help"}
+
+# Первое касание: /start приветствует и создаёт активную сессию (как первый контакт),
+# НЕ придумывая фактов о колледже — только объясняет, как пользоваться, и что при
+# необходимости диалог передаётся менеджеру.
+WELCOME_TEXT = (
+    "Здравствуйте! Это бот приёмной комиссии Intellect College.\n\n"
+    "Напишите ваш вопрос о поступлении обычным сообщением. Если по вашему вопросу нужна "
+    "точная информация, я передам диалог менеджеру.\n\n"
+    "Команды: /help — что я умею, /newtest — начать диалог заново."
+)
 
 HELP_TEXT = (
     "Доступные команды тест-пилота:\n"
+    "/start — приветствие и начало диалога\n"
     "/newtest — начать новую тестовую сессию (история сохраняется)\n"
     "/reset — сбросить текущую сессию и начать заново\n"
     "/status — показать текущее состояние сессии\n"
@@ -109,6 +120,16 @@ def parse_command(text: str) -> tuple[str, str]:
 # Command handlers — each returns the reply text (str). No network/adapter calls here,
 # so these are unit-testable without a fake Telegram bot.
 # --------------------------------------------------------------------------------------
+
+async def _cmd_start(bot_id: str, external_user_id: str, external_chat_id: str) -> str:
+    """`/start` (первое касание Telegram): гарантирует активную сессию (как /status —
+    reuse, если уже есть) и возвращает приветствие. Не трогает lead_status/квалификацию,
+    не вызывает FAQ/LLM, не придумывает фактов о колледже."""
+    await telegram_sessions.ensure_active_session(
+        bot_id, external_user_id, external_chat_id=external_chat_id,
+    )
+    return WELCOME_TEXT
+
 
 async def _cmd_newtest(bot_id: str, external_user_id: str, external_chat_id: str) -> str:
     await telegram_sessions.start_new_session(
@@ -219,6 +240,8 @@ async def handle_command(
         return UNKNOWN_COMMAND_TEXT
     if command == "/help":
         return HELP_TEXT
+    if command == "/start":
+        return await _cmd_start(bot_id, external_user_id, external_chat_id)
     if command == "/newtest":
         return await _cmd_newtest(bot_id, external_user_id, external_chat_id)
     if command == "/reset":
