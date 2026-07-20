@@ -200,6 +200,14 @@ async def _cmd_bot(bot_id: str, external_user_id: str, external_chat_id: str) ->
         session.conversation.id, actor=f"telegram_tester:{external_user_id}",
         reason="/bot command",
     )
+    # Also clear any legacy /admin-panel takeover (panel-store `intercepted`) so returning
+    # the dialog to the bot actually resumes replies — the route silence-gate checks both
+    # the leadstore dialog_owner AND the panel intercept (see route_message).
+    try:
+        await get_conversation_store().set_intercepted(
+            f"{bot_id}:{external_user_id}" if bot_id else external_user_id, False)
+    except Exception:  # noqa: BLE001 — panel bridge is best-effort, never breaks /bot
+        log.warning("clear panel intercept on /bot failed (bot=%s)", bot_id, exc_info=True)
     return "Диалог возвращён боту."
 
 
@@ -473,7 +481,16 @@ async def route_message(msg: Message, *, bot_id: str, adapter: Any, orchestrator
                 log.warning("pending-comment reply send failed (bot=%s)", bot_id, exc_info=True)
             return
 
-    if session.conversation.dialog_owner in ("manager", "paused"):
+    # Silence gate: the bot stays quiet if EITHER the canonical leadstore dialog_owner is
+    # manager/paused (LLM handoff, /manager) OR a manager took the dialog over from the
+    # legacy /admin panel (panel-store `intercepted`). The two ownership models are
+    # separate, so we bridge them here — otherwise an /admin manual takeover would NOT stop
+    # the Telegram bot and the client could get two answers at once. `/bot` clears the panel
+    # intercept again (see `_cmd_bot`), so returning the dialog to the bot resumes replies.
+    _panel_key = f"{bot_id}:{msg.user_id}" if bot_id else msg.user_id
+    _panel_conv = await get_conversation_store().get(_panel_key)
+    if session.conversation.dialog_owner in ("manager", "paused") or (
+            _panel_conv is not None and _panel_conv.intercepted):
         await _log_to_legacy_panel(msg, bot_id, orchestrator)
         return
 

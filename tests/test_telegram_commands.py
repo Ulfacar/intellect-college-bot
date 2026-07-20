@@ -684,3 +684,37 @@ def test_command_reply_send_failure_keeps_created_session():
         assert conv is not None  # session persisted despite the send failure
 
     _run(scenario())
+
+
+def test_admin_panel_intercept_silences_bot_and_bot_command_clears_it(monkeypatch):
+    """Regression (cat8): a manager taking a dialog over from the legacy /admin panel
+    (panel-store `intercepted`) must silence the Telegram bot — the panel and leadstore
+    ownership models are separate, so previously an /admin takeover did NOT stop the
+    Telegram reply (double answer risk). `/bot` clears the panel intercept -> bot resumes."""
+    monkeypatch.setattr(settings, "telegram_allowed_user_ids", [5511])
+    monkeypatch.setattr(settings, "telegram_allowed_chat_ids", [])
+    monkeypatch.setattr(settings, "webhook_secret", "")
+    called: list[int] = []
+
+    async def _fake_ai(*a, **k):
+        called.append(1)
+    monkeypatch.setattr("app.core.ai_reply.generate_and_send_reply", _fake_ai)
+
+    async def scenario():
+        bot_id, uid = "colint", "5511"
+        await telegram_sessions.ensure_active_session(bot_id, uid)
+        store = get_conversation_store()
+        key = f"{bot_id}:{uid}"
+        await store.ensure(key, bot_id=bot_id)
+        await store.set_intercepted(key, True)   # manager took over via /admin panel
+        adapter = _SendOnlyAdapter()
+        orch = _RecordingOrch()
+        msg = Message(channel="telegram", user_id=uid, chat_id=uid, text="Сколько стоит?", kind="text")
+        await telegram_commands.route_message(msg, bot_id=bot_id, adapter=adapter, orchestrator=orch)
+        assert adapter.sent == []          # bot stayed silent
+        assert called == []                # LLM reply path never reached
+        # /bot clears the panel intercept -> bot can answer again
+        await telegram_commands.handle_command(
+            bot_id=bot_id, external_user_id=uid, external_chat_id=uid, command="/bot", args="")
+        assert (await store.get(key)).intercepted is False
+    _run(scenario())
