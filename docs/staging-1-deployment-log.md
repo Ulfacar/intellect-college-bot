@@ -67,20 +67,21 @@ TELEGRAM_FEEDBACK_ENABLED=true
 - Токен проверен через `getMe` (токен не логируется): бот **@SupIntellect_bot**, id `8639963338`.
 - Ссылка для сбора ID: **https://t.me/SupIntellect_bot** (webhook намеренно НЕ установлен — сбор ID через `getUpdates`).
 
-## 8. Текущий блокер — DNS
+## 8. Запуск завершён — стенд рабочий ✅
 
-`intellectsuport.duckdns.org` резолвится в **`212.112.119.118`** (чужой IP), а не в `109.123.249.163`.
-Поэтому ACME (Let's Encrypt/ZeroSSL) не проходит HTTP-01 → **TLS-сертификат не выпущен, публичный HTTPS ещё не работает**.
-Сам VPS на `:80` снаружи доступен — как только запись DuckDNS `intellectsuport` укажет на `109.123.249.163`
-(через кабинет DuckDNS или обновление по токену), Caddy выпустит сертификат автоматически.
+DNS-блокер снят (владелец исправил `intellectsuport.duckdns.org → 109.123.249.163`). Далее:
+- Caddy выпустил TLS-сертификат Let's Encrypt (http-01), **`https://intellectsuport.duckdns.org/health/ready → 200`** снаружи, валидный сертификат.
+- **ADMIN UI v2** по HTTPS за Caddy Basic Auth (`support`) + вход приложения (`admin`) — 200, форма логина.
+- Собран Telegram ID владельца через `getUpdates` (после `deleteWebhook` — старая очередь мешала), внесён в `TELEGRAM_ALLOWED_USER_IDS=[…]`, app перезапущен (`allow_users=1`).
+- **Webhook** установлен на `https://intellectsuport.duckdns.org/webhook/telegram/college_test_1` (+ `secret_token`, `getWebhookInfo`: pending=0, ошибок нет).
+- **Живой E2E**: клиент написал боту → `POST /webhook/… → 200` → бот ответил через **OpenRouter (claude-haiku-4.5)** → доставлено → сохранено в БД (виден в ADMIN v2) → **расход $0.0052 из $1** записан. Секретов в логах нет.
 
-## 9. Осталось до рабочей ссылки
+## 9. Пост-запуск (доводка, не деплой)
 
-1. Исправить DNS `intellectsuport → 109.123.249.163` (действие владельца/токен).
-2. Проверить выпуск сертификата и `https://intellectsuport.duckdns.org/health/ready` + ADMIN UI v2 по HTTPS.
-3. Владелец/саппорты жмут `/start` → `getUpdates` → показать имя/username/ID → после подтверждения внести в `TELEGRAM_ALLOWED_USER_IDS` (формат `[id1,id2]`) → перезапустить app.
-4. `setWebhook` на `https://intellectsuport.duckdns.org/webhook/telegram/college_test_1` (+ `secret_token`) → `getWebhookInfo`.
-5. Smoke-тест: OpenRouter-ответ, расход, диалог в ADMIN UI v2, ручной ответ, takeover/release, Global OFF, персистентность после рестарта, HTTPS без предупреждений, отсутствие секретов в логах.
+- **`/start`** добавлен (коммит `e77cef4`): первое касание больше не «Неизвестная команда» — приветствие + активная сессия; без выдуманных фактов о колледже. Задеплоено на VPS.
+- Оформление бота через Bot API: меню команд (`setMyCommands`) + описание (`setMyDescription`/`ShortDescription`).
+- **Осталось (контент/процесс, не техника):** залить published FAQ реальными данными от колледжа (Эмир/опросник — факты не выдумываем); takeover/release саппорты делают через legacy `/admin` (в admin-v2 dialog_owner — демо-заглушка) либо командами `/manager`/`/bot`; собрать и внести Telegram ID саппортов в allowlist.
+- Доступы (пароли панели/basic-auth) — на сервере в `/etc/intellect/access.txt` (chmod 600).
 
 ## 10. Гарантии по секретам
 
